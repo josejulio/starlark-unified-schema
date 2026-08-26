@@ -1,0 +1,64 @@
+name: Deploy schema playground to Pages
+
+# Builds the in-browser schema playground (static HTML + Go/WASM compiler) and
+# publishes output/playground/ to GitHub Pages. The page compiles Starlark to
+# the canonical graph entirely client-side, so Pages' static hosting is enough.
+#
+# The .wasm binary is toolchain-specific and gitignored, so it is built here
+# rather than committed. To enable on a fork: Settings -> Pages -> Build and
+# deployment -> Source: "GitHub Actions", then run this workflow.
+
+on:
+  push:
+    branches: ['main']
+  workflow_dispatch:
+
+# Least privilege for the deploy: read the repo, write Pages, mint the OIDC
+# token actions/deploy-pages exchanges with Pages.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deploy; don't cancel an in-progress publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build playground
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: interpreter/go.mod
+          cache-dependency-path: interpreter/go.sum
+
+      - name: Build playground site
+        run: make graph-playground
+
+      - name: Disable Jekyll processing
+        run: touch output/playground/.nojekyll
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: output/playground
+
+  deploy:
+    name: Deploy to Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -2,7 +2,12 @@ module github.com/project-kessel/starlark-unified-schema
 
 go 1.25.0
 
-require github.com/project-kessel/ksl-schema-language v0.1.2
+require (
+	github.com/project-kessel/ksl-schema-language v0.1.2
+	github.com/stretchr/testify v1.11.1
+	go.starlark.net v0.0.0-20260522144826-ec58d4b459e2
+	gonum.org/v1/gonum v0.17.0
+)
 
 require (
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
@@ -21,12 +26,10 @@ require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/rs/zerolog v1.32.0 // indirect
 	github.com/stoewer/go-strcase v1.3.0 // indirect
-	github.com/stretchr/testify v1.11.1 // indirect
-	go.starlark.net v0.0.0-20260522144826-ec58d4b459e2 // indirect
 	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842 // indirect
 	golang.org/x/net v0.25.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
-	golang.org/x/text v0.15.0 // indirect
+	golang.org/x/text v0.23.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20240415180920-8c6c420018be // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240415180920-8c6c420018be // indirect
 	google.golang.org/grpc v1.63.2 // indirect

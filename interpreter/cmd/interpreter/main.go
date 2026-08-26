@@ -8,6 +8,7 @@ import (
 
 	"github.com/project-kessel/starlark-unified-schema/internal/lang"
 	"github.com/project-kessel/starlark-unified-schema/internal/output"
+	"github.com/project-kessel/starlark-unified-schema/internal/output/ksil"
 )
 
 func main() {
@@ -28,7 +29,8 @@ func main() {
 
 	directoryToVisitorMappings := map[string]output.SchemaVisitor{
 		"JSONSCHEMA_OUTPUT_DIR": output.NewJSONSchemaVisitor(),
-		"KSL_OUTPUT_DIR":        output.NewKSILVisitor(),
+		"KSL_OUTPUT_DIR":        ksil.NewKSILVisitor(),
+		"GRAPH_OUTPUT_DIR":      output.NewGraphVisitor(),
 	}
 	outputConfigs := createOutputConfigs(directoryToVisitorMappings)
 	if len(outputConfigs) == 0 {
