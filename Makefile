@@ -1,4 +1,4 @@
-.PHONY: build-interpreter build-interpreter-debug build-schema build-shipped-schema package-release clean test build-graph-renderer graph build-graph-analyzer graph-analyze build-graph-playground build-graph-wasm serve-graph-playground
+.PHONY: build-interpreter build-interpreter-debug build-schema build-shipped-schema package-release clean test build-graph-renderer graph build-graph-analyzer graph-analyze build-graph-playground build-graph-wasm graph-playground serve-graph-playground
 
 GRAPH_WEB_PORT ?= 8000
 
@@ -75,13 +75,18 @@ build-graph-wasm:
 	mkdir -p "$(GRAPH_PLAYGROUND_DIR)"
 	GOOS=js GOARCH=wasm go build -C ./interpreter/ -o "../$(GRAPH_PLAYGROUND_DIR)/graph-playground.wasm" ./cmd/graph-wasm
 
-# Assemble the live playground (schema source + WASM compiler + wasm_exec.js) and
-# serve output/playground/ over http. The page compiles Starlark to the graph
-# entirely in the browser; the .wasm sidecar must be fetched (blocked over
-# file://), so this must be served over http rather than opened as a file.
-serve-graph-playground: build-graph-playground build-graph-wasm
+# Assemble the live playground site (schema source + WASM compiler +
+# wasm_exec.js) into $(GRAPH_PLAYGROUND_DIR). This is the deployable artifact —
+# the CI Pages workflow uploads exactly this directory. Building it is separate
+# from serving so both the workflow and serve-graph-playground share one recipe.
+graph-playground: build-graph-playground build-graph-wasm
 	cp "$(WASM_EXEC)" "$(GRAPH_PLAYGROUND_DIR)/wasm_exec.js"
 	./bin/graph-playground -src schema -out "$(GRAPH_PLAYGROUND_DIR)/index.html"
+
+# Serve the built playground over http. The page compiles Starlark to the graph
+# entirely in the browser; the .wasm sidecar must be fetched (blocked over
+# file://), so this must be served over http rather than opened as a file.
+serve-graph-playground: graph-playground
 	@echo "Serving $(GRAPH_PLAYGROUND_DIR) at http://localhost:$(GRAPH_WEB_PORT)/ (Ctrl-C to stop)"
 	cd "$(GRAPH_PLAYGROUND_DIR)" && python3 -m http.server $(GRAPH_WEB_PORT)
 
