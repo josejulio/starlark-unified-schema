@@ -29,6 +29,7 @@ func main() {
 	directoryToVisitorMappings := map[string]output.SchemaVisitor{
 		"JSONSCHEMA_OUTPUT_DIR": output.NewJSONSchemaVisitor(),
 		"KSL_OUTPUT_DIR":        output.NewKSILVisitor(),
+		"GRAPH_OUTPUT_DIR":      output.NewGraphVisitor(),
 	}
 	outputConfigs := createOutputConfigs(directoryToVisitorMappings)
 	if len(outputConfigs) == 0 {

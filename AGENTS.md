@@ -9,5 +9,6 @@ Repo rules:
 - `common_representation.star` is a plain dict, not `resource()`
 - `references/` is obsolete — do not treat as source of truth
 - run `make test` after interpreter changes; run `make build-schema` after `.star` or output changes
+- `cmd/graph-wasm` is `//go:build js && wasm` (the in-browser compiler); host `go build ./...` skips it, so verify it with `make build-graph-wasm` when touching it or the `internal/lang`/`internal/web` code it shares
 - update README / ARCHITECTURE / relevant TESTING.md in the same PR when your change makes them wrong — do not copy their content here
 - only git commit when the user asks
