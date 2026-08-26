@@ -1,0 +1,58 @@
+name: PR graph (build)
+
+# Renders the canonical schema graph to Mermaid for a PR and uploads it as an
+# artifact. This job runs untrusted PR code (make graph executes the schema
+# interpreter over the PR's Starlark sources), so it is deliberately kept at
+# read-only permissions with no secrets. The paired "PR graph (comment)"
+# workflow_run workflow picks up the artifact and posts the comment with the
+# write token, without ever checking out or running PR code.
+
+on:
+  pull_request:
+    branches: ['main']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-graph-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Render graph
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: interpreter/go.mod
+          cache-dependency-path: interpreter/go.sum
+
+      - name: Render graph
+        run: make graph
+
+      - name: Build comment body
+        run: |
+          {
+            echo '## Schema graph'
+            echo '```mermaid'
+            cat output/graph/graph.mmd
+            echo '```'
+          } > comment.md
+
+      - name: Save PR number
+        run: echo "${{ github.event.pull_request.number }}" > pr-number.txt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-graph
+          path: |
+            comment.md
+            pr-number.txt
+          retention-days: 1
