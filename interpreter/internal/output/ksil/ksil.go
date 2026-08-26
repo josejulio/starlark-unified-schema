@@ -1,10 +1,18 @@
-package output
+// Package ksil holds the KSIL (KSL intermediate) output visitor. It lives in its
+// own package — rather than in internal/output alongside the other visitors —
+// because it is the only visitor that depends on ksl-schema-language, which in
+// turn pulls in SpiceDB's generated protobuf types and google.golang.org/grpc.
+// Keeping it separate lets the graph/JSON-Schema consumers (and especially the
+// WebAssembly playground build) import internal/output without linking grpc and
+// the SpiceDB protos they never call.
+package ksil
 
 import (
 	"bytes"
 	"fmt"
 
 	"github.com/project-kessel/ksl-schema-language/pkg/intermediate"
+	"github.com/project-kessel/starlark-unified-schema/internal/output"
 )
 
 type KSILVisitor struct {
@@ -47,7 +55,7 @@ func (k *KSILVisitor) BeginRelation(name string) {
 
 func (k *KSILVisitor) BeginType(name string) {}
 
-func (k *KSILVisitor) VisitResource(typeName string, reporter string, commonMembers *Members, reporterMembers *Members, extendsResource *ResourceTypeReference) error {
+func (k *KSILVisitor) VisitResource(typeName string, reporter string, commonMembers *output.Members, reporterMembers *output.Members, extendsResource *output.ResourceTypeReference) error {
 	if _, exists := k.namespaces[reporter]; !exists {
 		k.namespaces[reporter] = &intermediate.Namespace{
 			Name:                 reporter,
@@ -97,7 +105,7 @@ func (k *KSILVisitor) constructTypeAndAddToNamespace(ns *intermediate.Namespace,
 	ns.Types = append(ns.Types, typeObj)
 }
 
-func (k *KSILVisitor) constructSubclassExtensionAndAddToNamespace(ns *intermediate.Namespace, typeName string, relations []*intermediate.Relation, parent *ResourceTypeReference) error {
+func (k *KSILVisitor) constructSubclassExtensionAndAddToNamespace(ns *intermediate.Namespace, typeName string, relations []*intermediate.Relation, parent *output.ResourceTypeReference) error {
 	ownsMember := map[string]bool{}
 	for _, r := range relations {
 		ownsMember[r.Name] = true
@@ -225,8 +233,8 @@ func (k *KSILVisitor) VisitPermission(name string, body any) any {
 	}
 }
 
-func (k *KSILVisitor) Results() ([]OutputEntry, error) {
-	var outputs []OutputEntry
+func (k *KSILVisitor) Results() ([]output.OutputEntry, error) {
+	var outputs []output.OutputEntry
 
 	for nsName, namespace := range k.namespaces {
 		var buf bytes.Buffer
@@ -235,7 +243,7 @@ func (k *KSILVisitor) Results() ([]OutputEntry, error) {
 			return nil, fmt.Errorf("error serializing namespace %s: %w", nsName, err)
 		}
 
-		outputs = append(outputs, OutputEntry{
+		outputs = append(outputs, output.OutputEntry{
 			Path:     nsName + ".json",
 			Contents: buf.Bytes(),
 		})
