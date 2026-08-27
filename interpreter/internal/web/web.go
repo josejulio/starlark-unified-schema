@@ -77,13 +77,13 @@ func BuildElements(doc graphdoc.Document) []element {
 			data := map[string]any{
 				"id":       graphdoc.FacetID(n.TypeName, reporter),
 				"parent":   n.TypeName,
-				"label":    reporter,
+				"label":    reporter + "/" + n.TypeName,
 				"group":    "reporter",
 				"typeName": n.TypeName,
 				"reporter": reporter,
 			}
 			if ext := facet.Extends; ext != nil {
-				data["extends"] = ext.TypeName + " (" + ext.Reporter + ")"
+				data["extends"] = ext.Reporter + "/" + ext.TypeName
 			}
 			addMembers(data, facet.DataFields, facet.Permissions)
 			elements = append(elements, element{Classes: "reporter", Data: data})

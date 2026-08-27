@@ -28,7 +28,12 @@ type FacetRef struct {
 	Reporter string
 }
 
-func (f FacetRef) String() string { return f.TypeName + "." + f.Reporter }
+func (f FacetRef) String() string {
+	if f.Reporter == "" {
+		return f.TypeName
+	}
+	return f.Reporter + "/" + f.TypeName
+}
 
 // CostVar is a symbolic quantity a check's cost depends on: a hierarchy depth or
 // a per-relation fan-out that only concrete data can fix to a number.
@@ -251,7 +256,18 @@ func ExplainCheck(doc graphdoc.Document, object FacetRef, relation string) (*Che
 // is unresolved.
 func (r *checkResolver) resolveOn(f FacetRef, name string, path map[string]bool) *CheckNode {
 	if e, ok := r.relIn(f)[name]; ok {
-		n := &CheckNode{Kind: "relation", TypeName: f.TypeName, Reporter: f.Reporter, Name: name, Cardinality: e.Cardinality}
+		// Use the edge's SourceReporter, not f.Reporter, because the relation may
+		// be inherited from a parent facet. This ensures paths show the correct
+		// facet where the relation is actually defined.
+		sourceReporter := e.SourceReporter
+		if sourceReporter == "" && e.Scope == "common" {
+			sourceReporter = ""
+		}
+		n := &CheckNode{
+			Kind: "relation", TypeName: f.TypeName, Reporter: sourceReporter,
+			Name: name, Cardinality: e.Cardinality,
+			TargetType: e.Target, TargetReporter: e.TargetReporter,
+		}
 		n.expr = constExpr()
 		return n.finalize()
 	}
@@ -318,8 +334,13 @@ func (r *checkResolver) resolveArrow(f FacetRef, name, sub string, path map[stri
 	}
 
 	child := r.resolveSubOnType(e.Target, e.TargetReporter, sub, path)
+	// Use the edge's SourceReporter for inherited relations (same logic as resolveOn).
+	sourceReporter := e.SourceReporter
+	if sourceReporter == "" && e.Scope == "common" {
+		sourceReporter = ""
+	}
 	n := &CheckNode{
-		Kind: "arrow", TypeName: f.TypeName, Reporter: f.Reporter,
+		Kind: "arrow", TypeName: f.TypeName, Reporter: sourceReporter,
 		Name: name, Cardinality: e.Cardinality, Sub: sub,
 		TargetType: child.TypeName, TargetReporter: child.Reporter,
 		Children: []*CheckNode{child},
@@ -398,26 +419,51 @@ func (r *checkResolver) depthVar(e graphdoc.Edge, source string) CostVar {
 	}
 }
 
-// ParseCheckTarget splits "TYPE[.REPORTER]#RELATION" into the object facet and
-// relation a check is asked against. It is shared by the CLI and the WASM wrapper
-// so both accept the same target syntax.
+// ParseCheckTarget splits "REPORTER/TYPE#RELATION" (or "TYPE#RELATION" when no
+// reporter is specified) into the object facet and relation a check is asked
+// against. It is shared by the CLI and the WASM wrapper so both accept the same
+// target syntax.
 func ParseCheckTarget(s string) (FacetRef, string, error) {
 	hash := strings.LastIndex(s, "#")
 	if hash < 0 {
-		return FacetRef{}, "", fmt.Errorf("check target %q must be TYPE[.REPORTER]#RELATION", s)
+		return FacetRef{}, "", fmt.Errorf("check target %q must be REPORTER/TYPE#RELATION or TYPE#RELATION", s)
 	}
 	left, relation := s[:hash], s[hash+1:]
 	if relation == "" {
 		return FacetRef{}, "", fmt.Errorf("check target %q is missing a relation after '#'", s)
 	}
 	ref := FacetRef{TypeName: left}
-	if dot := strings.Index(left, "."); dot >= 0 {
-		ref.TypeName, ref.Reporter = left[:dot], left[dot+1:]
+	if slash := strings.Index(left, "/"); slash >= 0 {
+		ref.Reporter, ref.TypeName = left[:slash], left[slash+1:]
 	}
 	if ref.TypeName == "" {
 		return FacetRef{}, "", fmt.Errorf("check target %q is missing a resource type", s)
 	}
 	return ref, relation, nil
+}
+
+// ParseReachTarget splits "REPORTER/TYPE#RELATION[@SUBJECTTYPE]" (or
+// "TYPE#RELATION[@SUBJECTTYPE]" when no reporter) into the object facet,
+// relation, and optional subject type filter for reachability queries.
+func ParseReachTarget(s string) (FacetRef, string, string, error) {
+	// Split off optional @SUBJECTTYPE suffix.
+	at := strings.LastIndex(s, "@")
+	subjectType := ""
+	target := s
+	if at >= 0 {
+		target = s[:at]
+		subjectType = s[at+1:]
+		if subjectType == "" {
+			return FacetRef{}, "", "", fmt.Errorf("reach target %q has empty subject type after '@'", s)
+		}
+	}
+
+	// Parse the REPORTER/TYPE#RELATION part using existing logic.
+	ref, relation, err := ParseCheckTarget(target)
+	if err != nil {
+		return FacetRef{}, "", "", err
+	}
+	return ref, relation, subjectType, nil
 }
 
 func contains(s []string, v string) bool {

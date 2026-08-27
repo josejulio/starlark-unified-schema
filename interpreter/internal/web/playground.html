@@ -252,6 +252,27 @@
     }
 
     .faded { opacity: 0.12; }
+
+    /* Reachability section */
+    #reach-section { margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
+    #reach-results { font-size: 12px; }
+    #reach-results .unreachable { color: var(--err); padding: 8px; background: #2f1f1f; border-radius: 4px; margin-top: 8px; }
+    #reach-results .reachable-types { color: var(--muted); margin: 8px 0 12px; font-size: 13px; }
+    #reach-results .reachable-types strong { color: var(--text); }
+    #reach-results .path-list { margin-top: 8px; }
+    #reach-results .path-item {
+      padding: 10px 12px; margin-bottom: 8px; background: #0f1115; border-radius: 6px;
+      border: 1px solid var(--border); cursor: pointer; transition: all 0.15s;
+    }
+    #reach-results .path-item:hover { border-color: var(--accent); background: #13171f; }
+    #reach-results .path-item.selected { border-color: var(--accent); background: #1a1f28; box-shadow: 0 0 0 1px var(--accent); }
+    #reach-results .path-title { font-weight: 600; font-size: 13px; margin-bottom: 6px; }
+    #reach-results .path-meta { color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+    #reach-results .path-hint {
+      color: var(--muted); font-size: 11px; margin-top: 6px; opacity: 0.6;
+      font-style: italic;
+    }
+    #reach-results .path-item:hover .path-hint { color: var(--accent); opacity: 1; }
   </style>
 </head>
 <body>
@@ -293,6 +314,26 @@
       <button id="share" class="act" title="Copy a shareable link that carries your edits">🔗 Share link</button>
       <button id="reset" class="act" title="Discard edits and restore the shipped schema">↺ Reset</button>
       <button class="act" data-dl="png" title="Save the current graph as a PNG image">⬇ Export diagram as PNG</button>
+    </div>
+    <div id="reach-section">
+      <h2>Reachability</h2>
+      <div style="margin-bottom:8px;">
+        <select id="reach-facet" style="width:100%;padding:5px;border-radius:4px;border:1px solid var(--border);background:#0f1115;color:var(--text);font:inherit;font-size:12px;">
+          <option value="">— Select object type —</option>
+        </select>
+      </div>
+      <div style="margin-bottom:8px;">
+        <select id="reach-permission" style="width:100%;padding:5px;border-radius:4px;border:1px solid var(--border);background:#0f1115;color:var(--text);font:inherit;font-size:12px;">
+          <option value="">— Select permission —</option>
+        </select>
+      </div>
+      <div style="margin-bottom:8px;">
+        <select id="reach-subject" style="width:100%;padding:5px;border-radius:4px;border:1px solid var(--border);background:#0f1115;color:var(--text);font:inherit;font-size:12px;">
+          <option value="">— All subject types —</option>
+        </select>
+      </div>
+      <button id="reach-query" class="act" style="width:100%;margin-bottom:12px;">Explore paths</button>
+      <div id="reach-results"></div>
     </div>
     <div id="details"><p class="empty">Nothing selected.</p></div>
     <div id="legend">

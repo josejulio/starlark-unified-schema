@@ -380,6 +380,78 @@ heatmap), and clicking a permission overlays its proof-tree edges with cost-colo
 roles (recursion/fan-out), so the shape and expense of a rewrite are immediately
 visible.
 
+### Path / reachability
+
+`graph-analyze -paths TYPE[.REPORTER]#RELATION[@SUBJECTTYPE]` enumerates the
+**alternative grant paths** by which a permission can be satisfied — the complement
+to `-check`'s single-tree cost view. Where `-check` answers "what does this cost?",
+`-paths` answers "which subject types can grant this, and by what chains of
+relations?"
+
+```
+$ graph-analyze -in graph.json -paths workspace.features#enabled_services
+Reachability: workspace.features#enabled_services
+=================================================
+
+Reachable subject types (2):
+  - service
+  - workspace
+
+Paths (2):
+
+1. direct_billing_account → services → service  O(D_workspace) [CHEAPEST]
+   workspace.features --direct_billing_account (0..1)--> billing_account.features
+   billing_account.features --services (*)--> service.features [FAN-OUT]
+   AND (2 requirement(s)):
+     1. direct_service_preferences → service  O(1)
+     2. parent ↺ → _desired_services ↺ → workspace  O(1)
+   Cost: O(D_workspace) (depth 1, fan-out sites 0, recursive true)
+
+2. parent ↺ → _paid_services ↺ → workspace  O(D_workspace)
+   ...
+```
+
+The analysis is purely static — it uses **no instance data and no IDs**. It walks
+the permission rewrite tree (the same proof tree `-check` produces) and expands OR
+branches into alternative paths, each terminating at a reachable subject type. AND
+and UNLESS operators are recorded as annotations on the spine path rather than
+multiplied out combinatorially, so path count tracks OR-branches, not products.
+
+**Query syntax.** The target is `TYPE[.REPORTER]#RELATION[@SUBJECTTYPE]`:
+- `TYPE[.REPORTER]#RELATION` — the object facet and permission/relation to analyze
+  (same as `-check`)
+- `@SUBJECTTYPE` (optional) — filter paths to only those reaching this subject type;
+  when set, the report's `reachable` field answers "can SUBJECTTYPE grant this?"
+
+**ReachReport contract.** The JSON output (`-format json`) contains:
+- `reachableTypes` — sorted, deduped list of terminal subject types
+- `paths` — array of grant paths; each path is a chain of `Hops` (relation
+  traversals) with `Conjuncts` (AND requirements) and `Exclusions` (UNLESS
+  conditions) nested as annotations
+- `cheapest` / `worst` — the min/max paths by the static scalar tuple
+  `(fanoutSites, recursive, dispatchDepth)`, representing the best-case granting
+  path (SpiceDB short-circuits OR) vs. the worst-case fallback
+- `proof` — the underlying `ExplainCheck` proof tree, for tree-view rendering
+
+A path with `subjectType == ""` is a dead-end: the permission references a
+relation or permission that does not resolve. `reachable: false` when
+`@SUBJECTTYPE` is specified means the schema does not connect that subject type to
+the queried permission — a first-class answer surfacing schema gaps.
+
+**WASM.** The **same** analysis runs in the browser: `cmd/graph-wasm` exports
+`kesselReachPaths(graph, "TYPE[.REPORTER]#RELATION[@SUBJECTTYPE]")` that calls
+`web.Reach` → `analyze.Reach`, so paths enumerated in the playground are
+byte-identical to `graph-analyze -paths -format json`. A parity golden test pins
+this guarantee.
+
+**Inherited limitations.** Path analysis reuses the `-check` cost model and
+inherits its constraints:
+- **One target per relation.** A `typeUnion` target is not expanded; each relation
+  yields exactly one edge.
+- **Subject-set expansion treated as a leaf match.** The subject side of a check
+  only matters at the leaves (does the subject match a resolved relation), which
+  does not change the walk's structure, so the analysis is subject-independent.
+
 ## Known limitations (v1)
 
 - **No resource `idType` or `final` on nodes.** The `SchemaVisitor` interface

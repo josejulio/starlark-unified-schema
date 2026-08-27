@@ -351,9 +351,15 @@
     // the playground (the static page has no provider and shows none).
     window.KesselCost = makeCostProvider(res.graph);
 
+    // Install the reachability provider for the path explorer.
+    window.KesselReach = makeReachProvider(res.graph);
+
     render(elements);
     var counts = countElements(elements);
     setStatus("ok", "Compiled ✓  " + counts.types + " types, " + counts.edges + " edges.");
+
+    // Populate reachability dropdowns after successful compile.
+    populateReachabilityControls(res.graph);
   }
 
   // makeCostProvider returns a function that explains a check target
@@ -377,6 +383,343 @@
         return { error: "invalid check JSON: " + e.message };
       }
     };
+  }
+
+  // makeReachProvider returns a function that explores reachability for a target
+  // ("TYPE.REPORTER#RELATION[@SUBJECTTYPE]") against the compiled graph via WASM.
+  function makeReachProvider(graph) {
+    return function (target) {
+      if (typeof window.kesselReachPaths !== "function") return null;
+      var res;
+      try {
+        res = window.kesselReachPaths(graph, target);
+      } catch (e) {
+        return { error: String((e && e.message) || e) };
+      }
+      if (!res || !res.ok) return { error: (res && res.error) || "reach failed" };
+      try {
+        return JSON.parse(res.paths);
+      } catch (e) {
+        return { error: "invalid paths JSON: " + e.message };
+      }
+    };
+  }
+
+  // populateReachabilityControls fills the reachability dropdowns with facets
+  // and permissions from the compiled graph.
+  function populateReachabilityControls(graphJSON) {
+    var graph;
+    try {
+      graph = JSON.parse(graphJSON);
+    } catch (e) {
+      return;
+    }
+
+    var facetSelect = document.getElementById("reach-facet");
+    var permSelect = document.getElementById("reach-permission");
+    var subjectSelect = document.getElementById("reach-subject");
+
+    // Build list of facets (reporter/type pairs) from nodes array.
+    var facets = [];
+    var allTypes = new Set();
+    (graph.nodes || []).forEach(function (node) {
+      if (node.kind !== "resource") return;
+      var typeName = node.typeName;
+      allTypes.add(typeName);
+      // Reporters is an object with reporter names as keys
+      Object.keys(node.reporters || {}).forEach(function (reporterName) {
+        facets.push({
+          type: typeName,
+          reporter: reporterName,
+          label: reporterName + "/" + typeName,
+          permissions: node.reporters[reporterName].permissions || []
+        });
+      });
+    });
+
+    // Sort facets by label.
+    facets.sort(function (a, b) { return a.label.localeCompare(b.label); });
+
+    // Populate facet dropdown.
+    facetSelect.innerHTML = '<option value="">— Select object type —</option>';
+    facets.forEach(function (f) {
+      var opt = document.createElement("option");
+      opt.value = f.label;
+      opt.textContent = f.label;
+      opt.setAttribute("data-type", f.type);
+      opt.setAttribute("data-reporter", f.reporter);
+      opt.setAttribute("data-index", facets.indexOf(f));
+      facetSelect.appendChild(opt);
+    });
+
+    // Populate subject type dropdown with all types.
+    var types = Array.from(allTypes).sort();
+    subjectSelect.innerHTML = '<option value="">— All subject types —</option>';
+    types.forEach(function (t) {
+      var opt = document.createElement("option");
+      opt.value = t;
+      opt.textContent = t;
+      subjectSelect.appendChild(opt);
+    });
+
+    // Store facets for permission lookup
+    facetSelect._facets = facets;
+
+    // When facet changes, populate permissions for that facet.
+    facetSelect.addEventListener("change", function () {
+      permSelect.innerHTML = '<option value="">— Select permission —</option>';
+      if (!facetSelect.value) return;
+      var sel = facetSelect.options[facetSelect.selectedIndex];
+      var idx = parseInt(sel.getAttribute("data-index"), 10);
+      if (isNaN(idx) || !facetSelect._facets || !facetSelect._facets[idx]) return;
+      var facet = facetSelect._facets[idx];
+      var perms = (facet.permissions || []).map(function (p) { return p.name; }).sort();
+      perms.forEach(function (p) {
+        var opt = document.createElement("option");
+        opt.value = p;
+        opt.textContent = p;
+        permSelect.appendChild(opt);
+      });
+    });
+  }
+
+  // Wire up the reachability query button.
+  document.getElementById("reach-query").addEventListener("click", function () {
+    var facetSelect = document.getElementById("reach-facet");
+    var permSelect = document.getElementById("reach-permission");
+    var subjectSelect = document.getElementById("reach-subject");
+    var resultsDiv = document.getElementById("reach-results");
+
+    var facet = facetSelect.value;
+    var perm = permSelect.value;
+    var subject = subjectSelect.value;
+
+    if (!facet || !perm) {
+      resultsDiv.innerHTML = '<p class="empty">Select object type and permission.</p>';
+      return;
+    }
+
+    var target = facet + "#" + perm + (subject ? "@" + subject : "");
+    var result = window.KesselReach ? window.KesselReach(target) : null;
+
+    if (!result) {
+      resultsDiv.innerHTML = '<p class="err">Reachability provider not available.</p>';
+      return;
+    }
+
+    if (result.error) {
+      resultsDiv.innerHTML = '<p class="err">' + esc(result.error) + '</p>';
+      return;
+    }
+
+    renderReachResults(resultsDiv, result, facet, perm, subject);
+  });
+
+  // renderReachResults displays the reachability report in the panel.
+  // Note: ReachReport fields use camelCase (have JSON tags).
+  function renderReachResults(container, report, facet, perm, subject) {
+    if (!report) {
+      container.innerHTML = '<p class="err">No report data received.</p>';
+      return;
+    }
+
+    var html = "";
+
+    // Show all reachable types first
+    var reachableTypes = report.reachableTypes || [];
+    if (reachableTypes.length > 0) {
+      html += '<p class="reachable-types" style="margin-bottom:8px;">Reachable types: <strong>' +
+        reachableTypes.map(esc).join(", ") + '</strong></p>';
+    }
+
+    // Show filter status if subject type was specified.
+    if (subject) {
+      if (report.reachable) {
+        html += '<p style="color:var(--ok);font-size:12px;margin:8px 0;">Showing paths to <strong>' + esc(subject) + '</strong> only</p>';
+      } else {
+        html += '<div class="unreachable">✗ Not reachable from ' + esc(subject) + '</div>';
+      }
+    }
+
+    // Show paths.
+    var paths = report.paths || [];
+    if (paths.length === 0) {
+      html += '<div class="unreachable">No paths found — schema does not support this permission.</div>';
+    } else {
+      html += '<div class="path-list">';
+      paths.forEach(function (path, idx) {
+        if (!path) return;
+        var isCheapest = report.cheapest && pathsEqual(path, report.cheapest);
+        html += renderPath(path, idx + 1, isCheapest);
+      });
+      html += '</div>';
+    }
+
+    container.innerHTML = html;
+
+    // Wire up path selection for graph highlighting.
+    var pathItems = container.querySelectorAll(".path-item");
+    pathItems.forEach(function (item, idx) {
+      item.addEventListener("click", function () {
+        pathItems.forEach(function (p) { p.classList.remove("selected"); });
+        item.classList.add("selected");
+        if (window.kesselGraph && paths[idx]) {
+          highlightPath(paths[idx]);
+        }
+      });
+    });
+  }
+
+  // renderPath renders a single path as a simplified card.
+  // Note: JSON field names are capitalized (Go exported fields).
+  function renderPath(path, num, isCheapest) {
+    if (!path) return "";
+
+    var hops = path.Hops || [];
+    var subjectType = path.SubjectType || "unresolved";
+
+    // Build title: "Path N: subject_type" with optional cheapest marker
+    var title = "Path " + num + ": " + subjectType;
+    var cheapestMarker = isCheapest ? ' <span class="badge" style="background:#1f2b22;color:var(--ok);font-size:11px;margin-left:6px;">★ CHEAPEST</span>' : "";
+
+    // Build metadata line: hop count, cost, flags
+    var metadata = [];
+    metadata.push(hops.length + (hops.length === 1 ? " hop" : " hops"));
+
+    if (path.Cost) {
+      metadata.push(path.Cost.bigO || "O(?)");
+      if (path.Cost.fanoutSites > 0) metadata.push("Fan-out");
+      if (path.Cost.recursive) metadata.push("Recursive");
+    }
+
+    var metaLine = metadata.join(" • ");
+
+    // Build conjunct/exclusion summary
+    var annotations = [];
+    var conjuncts = path.Conjuncts || [];
+    var exclusions = path.Exclusions || [];
+    if (conjuncts.length > 0) {
+      var reqText = conjuncts.length === 1 ? "1 additional check" : conjuncts.length + " additional checks";
+      annotations.push('<span style="color:#ffd166;" title="This path requires ' + conjuncts.length + ' other condition(s) to also be true">+ ' + reqText + '</span>');
+    }
+    if (exclusions.length > 0) {
+      var exText = exclusions.length === 1 ? "1 exclusion" : exclusions.length + " exclusions";
+      annotations.push('<span style="color:#ff6b6b;" title="This path is denied if ' + exclusions.length + ' condition(s) are true">− ' + exText + '</span>');
+    }
+    var annoLine = annotations.length > 0 ? '<div style="margin-top:4px;font-size:11px;">' + annotations.join(" • ") + '</div>' : "";
+
+    var html = '<div class="path-item">';
+    html += '<div class="path-title">' + esc(title) + cheapestMarker + '</div>';
+    html += '<div class="path-meta">' + esc(metaLine) + '</div>';
+    html += annoLine;
+    html += '<div class="path-hint">Click to highlight on graph →</div>';
+    html += '</div>';
+
+    return html;
+  }
+
+  // renderCostBadge returns a colored cost badge matching the cost chip style.
+  // Note: Cost fields use camelCase (have JSON tags).
+  function renderCostBadge(cost) {
+    var cls = "cheap";
+    if (cost.fanoutSites > 0) cls = "fanout";
+    else if (cost.recursive) cls = "depth";
+    return '<span class="badge cost ' + cls + '">' + esc(cost.bigO || "O(?)") + '</span>';
+  }
+
+  // formatCardinality converts Cardinality enum to multiplicity string.
+  function formatCardinality(card) {
+    switch (card) {
+      case "ExactlyOne": return "";
+      case "AtMostOne": return "0..1";
+      case "AtLeastOne": return "1..*";
+      case "Many": return "*";
+      default: return card;
+    }
+  }
+
+  // pathSummary returns a short summary of a path for conjunct/exclusion display.
+  function pathSummary(path) {
+    if (!path) return "?";
+    var hops = path.Hops || [];
+    if (hops.length === 0) return path.SubjectType || "?";
+    return hops.map(function (h) { return (h && h.Relation) || "?"; }).join(" → ");
+  }
+
+  // pathsEqual compares two paths for equality (used to detect cheapest).
+  function pathsEqual(a, b) {
+    if (!a || !b) return false;
+    if (a.SubjectType !== b.SubjectType) return false;
+    var aHops = a.Hops || [];
+    var bHops = b.Hops || [];
+    if (aHops.length !== bHops.length) return false;
+    for (var i = 0; i < aHops.length; i++) {
+      var aRel = aHops[i] && aHops[i].Relation;
+      var bRel = bHops[i] && bHops[i].Relation;
+      if (aRel !== bRel) return false;
+    }
+    return true;
+  }
+
+  // highlightPath highlights the edges corresponding to a path on the graph.
+  function highlightPath(path) {
+    var cy = window.kesselGraph;
+    if (!cy || !path) return;
+
+    cy.elements().removeClass("perm-affected perm-fanout perm-recursive faded");
+
+    var hops = path.Hops || [];
+    if (hops.length === 0) {
+      // No hops to highlight.
+      return;
+    }
+
+    var affected = cy.collection();
+
+    // Highlight each hop's relation edge.
+    hops.forEach(function (hop) {
+      if (!hop) return;
+      var fromId = hop.FromType + (hop.FromReporter ? "__" + hop.FromReporter : "__common");
+      var toId = hop.ToType + (hop.ToReporter ? "__" + hop.ToReporter : "__common");
+
+      cy.edges().forEach(function (e) {
+        if (e.data("kind") !== "relation") return;
+        if (e.data("source") !== fromId) return;
+        if (e.data("name") !== hop.Relation) return;
+
+        // For inherited relations, the target facet might differ (e.g., rbac/workspace's
+        // parent relation leads to rbac/workspace, but when inherited by features/workspace,
+        // we might resolve a sub on features/workspace). Match if either:
+        // 1. Exact target match, OR
+        // 2. Target type matches (for cross-facet resolution)
+        var edgeTarget = e.data("target");
+        var edgeTargetType = e.data("target").split("__")[0];
+        var hopTargetType = hop.ToType;
+
+        if (edgeTarget === toId || edgeTargetType === hopTargetType) {
+          affected = affected.union(e);
+          if (hop.Fanout) e.addClass("perm-fanout");
+          if (hop.Recursive) e.addClass("perm-recursive");
+        }
+      });
+    });
+
+    // Fade everything except the affected edges and their nodes.
+    cy.elements().addClass("faded");
+    var keep = affected
+      .union(affected.connectedNodes())
+      .union(affected.connectedNodes().ancestors());
+    keep.removeClass("faded");
+    affected.addClass("perm-affected");
+  }
+
+  // esc is defined in render.js, but we need it here for the path display.
+  function esc(s) {
+    return String(s || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
   }
 
   function render(elements) {
