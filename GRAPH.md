@@ -205,14 +205,16 @@ edges between them. The layout is swappable (default `dagre`, hierarchical/direc
 
 **Visual encoding.**
 
-| Element                | Encoding                                             |
-| ---------------------- | ---------------------------------------------------- |
-| resource type          | compound container box (groups its facets)           |
-| common representation  | purple node                                          |
-| reporter facet         | blue node                                            |
-| relation               | grey solid arrow, labelled `name` + UML multiplicity |
-| self-relation          | orange arrow (targets its own facet)                 |
-| inheritance (`extends`)| dashed green arrow (child → parent)                  |
+| Element                              | Encoding                                             |
+| ------------------------------------ | ---------------------------------------------------- |
+| resource type                        | compound container box (groups its facets)           |
+| common representation                | purple node                                          |
+| reporter facet                       | blue node                                            |
+| reporter facet (playground only)     | bordered by worst permission cost: green (O(1)), amber (O(D) recursion), red (O(N·…) fan-out) |
+| relation                             | grey solid arrow, labelled `name` + UML multiplicity |
+| self-relation                        | orange arrow (targets its own facet)                 |
+| inheritance (`extends`)              | dashed green arrow (child → parent)                  |
+| permission overlay (playground only) | when a permission is clicked, affected edges are coloured: amber-dashed (recursion hop), red-thick (fan-out hop) |
 
 Multiplicity follows the Mermaid rule: `(0..1)` at most one, `(1..*)` at least
 one, `(*)` many; `ExactlyOne` is the implicit default and left off labels. A
@@ -227,7 +229,16 @@ already in `graph.json` — no second input:
   fields** (each rendered with a recursive summary of its `dataType`, e.g.
   `uuid?`, `text(maxLength=255)`, `(uuid | text(regex=…))`, `array<…>`), and its
   **permissions** (the `and`/`or`/`unless`/`reference`/`subreference` rewrite
-  trees rendered as a nested, indented view).
+  trees rendered as a nested, indented view). On a **reporter** facet each
+  permission name also carries a **read-cost chip** — the same symbolic `bigO`
+  the analyzer computes (see *Check cost* below), colour-coded by its dominant
+  driver (constant-time, hierarchy/recursion walk, or fan-out over a
+  many-relation) — so the cost of a rewrite is glanceable without leaving the
+  graph. The chip is present only in the playground, where a compiler is loaded;
+  the static page renders permissions without it. Clicking a permission in the
+  playground also highlights the relation edges its rewrite traverses,
+  cost-coloured by their role (amber-dashed for recursion hops, red-thick for
+  fan-out hops).
 - **Edge** — relation metadata (name, cardinality, scope, source/target,
   reporters, self) or the inheritance source/target.
 
@@ -290,6 +301,85 @@ graph; every other component is an island:
 
 Output is a text report by default (`-format json` for programmatic consumers).
 
+### Check cost
+
+`graph-analyze -check TYPE[.REPORTER]#RELATION` explains the **read cost of a
+single check** — the `object#relation@subject` query that inventory-api's
+[`CheckRequest`](https://buf.build/project-kessel/inventory-api/docs/main:kessel.inventory.v1beta2#kessel.inventory.v1beta2.CheckRequest)
+carries (`object` = a reporter facet, `relation` = one named permission-or-relation,
+`subject` = a subject or subject-set). It walks the permission rewrite from the
+object down the relation topology and returns a **proof tree** annotated with cost:
+
+```
+$ graph-analyze -in graph.json -check workspace.features#enabled_services
+Cost:      O(D_workspace)
+Depth:     1 sequential hop(s)   Fan-out sites: 0   Recursive: true
+
+permission "enabled_services" on workspace.features    O(D_workspace)
+└─ AND    O(D_workspace)
+   ├─ permission "_paid_services" on workspace.features    O(D_workspace)
+   │  └─ OR    O(D_workspace)
+   │     ├─ direct_billing_account (0..1) → billing_account.features ⇒ services    O(1)
+   │     │  └─ relation "services" (*)    O(1)
+   │     └─ parent (0..1) → workspace.features ⇒ _paid_services    O(D_workspace)
+   │        └─ ↺ _paid_services on workspace.features (recursion)    O(1)
+   └─ permission "_desired_services" on workspace.features    O(D_workspace)
+      └─ …
+```
+
+Why cost, not just correctness: the load-bearing hard part of schema design is
+coming up with computed-permission rules that **read** well — e.g. weighing a
+bidirectional relation against inverting a relation's direction. That is largely a
+**static property of the graph**: a check dispatches sub-checks along the arrows of
+the rewrite, so its shape and asymptotics follow from topology + `cardinality` +
+the rewrite trees alone, with **no instance data**.
+
+**The cost model.** Each rewrite construct maps to a cost, composed bottom-up:
+
+| Construct                                   | Cost                                             |
+| ------------------------------------------- | ------------------------------------------------ |
+| direct relation (`reference`)               | `O(1)` — one indexed membership check            |
+| `or` / `and` / `unless`                     | sum of both operands (worst case)                |
+| `subreference` over a single-target edge    | one hop: `O(1 + sub)`                            |
+| `subreference` over a `many`/`≥1`/`All` edge | fan-out: `O(N_edge · sub)`                       |
+| `subreference` that re-enters a permission  | recursion: `O(D_type)` (tree), `O(reach(type))` if it fans out |
+
+Because a check's true cost is **data-dependent**, the headline `bigO` is symbolic
+in named variables (`D_workspace` = hierarchy depth, `N_parent` = per-relation
+fan-out) that only real tuple counts can fix to a number. Two fully-static scalars
+accompany it on every node: **`dispatchDepth`** (sequential arrow hops → a latency
+proxy; recursion counted once, flagged by `recursive` + the depth variable) and
+**`fanoutSites`** (arrows over many-cardinality relations → a work proxy). Together
+they make design alternatives **sortable at a glance** while staying honest that
+absolute latency needs a real resolver.
+
+**Resolution.** Names resolve in a facet's scope — its own members, its type's
+`common` members, and everything inherited from facets it `extends` (own wins on
+clashes), mirroring the web highlighter. A `subreference`'s downstream name is
+resolved on the *target type*, preferring the edge's target reporter but falling
+back to the type's other facets — so `parent` (which targets `workspace.rbac`) still
+finds `_paid_services` on `workspace.features`, which is what makes the recursion
+visible. This is a pure `graph.json` consumer in `internal/analyze` (see
+`ExplainCheck`); a golden test compiles the committed schema and pins the model.
+
+The **same** analysis runs in the browser: `cmd/graph-wasm` exports a
+`kesselExplainCheck(graph, "TYPE[.REPORTER]#RELATION")` global that calls
+`web.ExplainCheck` → `analyze.ExplainCheck`, so a check explained in the
+playground is byte-identical to `graph-analyze -check -format json`. The
+playground installs it as a cost provider after each compile and the inspector
+uses it to draw the per-permission cost chips described above.
+
+What it is **not**: it ranks structural alternatives and flags red flags
+(fan-out, hierarchy walks); it does **not** predict production latency (that needs
+real tuple counts, cache behavior, and the request's `Consistency` mode), and it
+does not yet author a cheaper rewrite for you.
+
+The playground **visualises** this same cost model on the graph itself: each
+reporter facet is bordered by the worst permission cost it carries (green/amber/red
+heatmap), and clicking a permission overlays its proof-tree edges with cost-coloured
+roles (recursion/fan-out), so the shape and expense of a rewrite are immediately
+visible.
+
 ## Known limitations (v1)
 
 - **No resource `idType` or `final` on nodes.** The `SchemaVisitor` interface
@@ -304,3 +394,10 @@ Output is a text report by default (`-format json` for programmatic consumers).
   (perm → referenced relation/permission) from those trees for the
   permission-rewrite view and cycle-detection lints, without changing this
   artifact.
+- **Check cost is structural, not measured.** `-check` computes worst-case *shape*
+  from the graph (fan-out, hierarchy depth, hops) with symbolic variables for
+  data-dependent quantities. It does not consume tuple counts, cache behavior, or
+  the request's `Consistency` mode, so it ranks alternatives rather than predicting
+  latency. It also inherits the one-target-per-relation limit above (a `typeUnion`
+  target would multiply fan-out) and treats the subject side as a leaf match (no
+  subject-set expansion), since neither changes the walk's structure.

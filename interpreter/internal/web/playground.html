@@ -212,21 +212,30 @@
     .perm .pname:hover { color: var(--accent); }
     .expr .leaf[data-ref] { cursor: pointer; }
     .expr .leaf[data-ref]:hover { color: var(--accent); }
-    /* The selected permission / reference: a filled accent chip so it is obvious
-       which rewrite the current graph highlight corresponds to. The :hover
-       variants must be listed too — the hover rules above are more specific (the
-       [data-ref] attribute selector), so without them a hovered-and-selected leaf
-       would flip its text back to accent-on-accent and vanish. */
-    .perm .pname.sel, .perm .pname.sel:hover,
-    .expr .leaf.sel, .expr .leaf[data-ref].sel:hover {
-      color: var(--bg); background: var(--accent);
-      border-radius: 4px; padding: 1px 6px;
+    /* The selected permission / reference: marked with a small indicator badge
+       to avoid collision with cost chips. */
+    .perm .pname.sel::before,
+    .expr .leaf.sel::before {
+      content: "▶";
+      display: inline-block;
+      margin-right: 4px;
+      color: var(--accent);
+      font-size: 10px;
+      vertical-align: middle;
     }
-    .perm .pname.sel { display: inline-block; }
-    .expr .leaf.sel .arrow { color: var(--bg); }
     .badge.rel { background: #1f2b22; color: var(--ok); }
     .badge.perm { background: #2b2536; color: #c9a5ff; }
     .refkind { font-size: 10px; margin-left: 6px; padding: 0 6px; }
+    /* Read-cost chip on a permission name: colour encodes the dominant driver —
+       constant-time (green), a hierarchy/recursion walk (amber), fan-out over a
+       many-relation (red). Monospace so the O(...) reads as a formula. */
+    .badge.cost {
+      font-size: 10px; margin-left: 8px; padding: 0 6px; font-weight: 500;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; cursor: help;
+    }
+    .badge.cost.cheap  { background: #1f2b22; color: var(--ok); }
+    .badge.cost.depth  { background: #2e2a1c; color: #f0c674; }
+    .badge.cost.fanout { background: #2f1f1f; color: var(--err); }
 
     #legend { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 12px; }
     #legend .row { display: flex; align-items: center; gap: 8px; margin: 5px 0; font-size: 12px; color: var(--muted); }
@@ -295,6 +304,18 @@
       <div class="row"><span class="line" style="border-top:2px solid #c98a2b"></span> self-relation</div>
       <div class="row"><span class="line" style="border-top:2px dashed #4bbf8a"></span> extends (inherits)</div>
       <div class="row"><span class="line" style="border-top:2px dotted #8a5cf6"></span> common shared into reporters</div>
+      <div class="mult">
+        <div class="mult-title">Read cost (worst permission)</div>
+        <div class="row"><span style="color:#4bbf8a;font-size:16px;">●</span> O(1) — cheap</div>
+        <div class="row"><span style="color:#f0c674;font-size:16px;">◐</span> O(D) — recursion/hierarchy walk</div>
+        <div class="row"><span style="color:#ff6b6b;font-size:16px;">◆</span> O(N·…) — fan-out over many</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;">Badge appears on facet node label</div>
+      </div>
+      <div class="mult">
+        <div class="mult-title">Permission overlay (on click)</div>
+        <div class="row"><span class="line" style="border-top:3px dashed #f0c674"></span> recursion hop</div>
+        <div class="row"><span class="line" style="border-top:4.5px solid #ff6b6b"></span> fan-out hop</div>
+      </div>
       <div class="mult">
         <div class="mult-title">Multiplicity</div>
         <div class="row"><code>(0..1)</code> at most one</div>

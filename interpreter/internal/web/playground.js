@@ -345,9 +345,38 @@
       return;
     }
 
+    // Install the check-cost provider over the freshly compiled graph so the
+    // inspector can annotate each permission with its read cost. render.js
+    // feature-detects window.KesselCost, so this is what turns cost chips on in
+    // the playground (the static page has no provider and shows none).
+    window.KesselCost = makeCostProvider(res.graph);
+
     render(elements);
     var counts = countElements(elements);
     setStatus("ok", "Compiled ✓  " + counts.types + " types, " + counts.edges + " edges.");
+  }
+
+  // makeCostProvider returns a function that explains a check target
+  // ("TYPE.REPORTER#RELATION") against the given compiled graph via the WASM
+  // analyzer, returning { cost, root } or { error }. It closes over the graph so
+  // each compile refreshes the costs the inspector shows.
+  function makeCostProvider(graph) {
+    return function (target) {
+      if (typeof window.kesselExplainCheck !== "function") return null;
+      var res;
+      try {
+        res = window.kesselExplainCheck(graph, target);
+      } catch (e) {
+        return { error: String((e && e.message) || e) };
+      }
+      if (!res || !res.ok) return { error: (res && res.error) || "check failed" };
+      try {
+        var root = JSON.parse(res.check);
+        return { cost: root.cost, root: root };
+      } catch (e) {
+        return { error: "invalid check JSON: " + e.message };
+      }
+    };
   }
 
   function render(elements) {
