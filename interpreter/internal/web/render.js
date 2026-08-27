@@ -59,6 +59,29 @@ window.KesselRender = (function () {
             "height": 30,
           },
         },
+        // Phase A: cost badge styling - the badge symbol in the label is colored
+        // to match its cost severity. Using text-outline to make it stand out.
+        {
+          selector: "node.reporter.cost-cheap",
+          style: {
+            "text-outline-color": "#4bbf8a",
+            "text-outline-width": 0.5,
+          },
+        },
+        {
+          selector: "node.reporter.cost-depth",
+          style: {
+            "text-outline-color": "#f0c674",
+            "text-outline-width": 0.5,
+          },
+        },
+        {
+          selector: "node.reporter.cost-fanout",
+          style: {
+            "text-outline-color": "#ff6b6b",
+            "text-outline-width": 0.5,
+          },
+        },
         {
           selector: "edge",
           style: {
@@ -130,12 +153,32 @@ window.KesselRender = (function () {
             "z-index": 10,
           },
         },
+        // Phase B: cost-coloured permission overlay — recursion and fan-out hops.
+        {
+          selector: "edge.perm-affected.perm-recursive",
+          style: {
+            "line-color": "#f0c674",
+            "target-arrow-color": "#f0c674",
+            "line-style": "dashed",
+          },
+        },
+        {
+          selector: "edge.perm-affected.perm-fanout",
+          style: {
+            "line-color": "#ff6b6b",
+            "target-arrow-color": "#ff6b6b",
+            "width": 4.5,
+          },
+        },
       ],
       layout: layoutOptions(opts.layoutName || "dagre"),
     });
 
     // Exposed for console debugging (e.g. kesselGraph.$('#workspace__features')).
     window.kesselGraph = cy;
+
+    // Phase A: apply cost heatmap to reporter facets if cost provider is present.
+    applyCostHeatmap(cy);
 
     // Keep the graph in sync with its container. Cytoscape caches the container
     // size and only re-reads it on resize(), so a window resize otherwise leaves
@@ -239,10 +282,53 @@ window.KesselRender = (function () {
     return base;
   }
 
+  // --- Phase A: cost heatmap ---------------------------------------------------
+
+  // applyCostHeatmap adds a small cost badge icon to each reporter facet node
+  // showing the worst read cost among its permissions (fan-out > recursion > cheap).
+  // Appends a colored symbol to the node label instead of using borders, so it
+  // stays visible even when the node is selected. Feature-detected: returns
+  // immediately if no cost provider.
+  function applyCostHeatmap(cy) {
+    if (typeof window.KesselCost !== "function") return;
+    cy.nodes(".reporter").forEach(function (node) {
+      var perms = node.data("permissions");
+      if (!perms || !perms.length) return;
+      var typeName = node.data("typeName");
+      var reporter = node.data("reporter");
+      var worst = null; // null | "cheap" | "depth" | "fanout"
+      perms.forEach(function (p) {
+        var res = window.KesselCost(typeName + "." + reporter + "#" + p.name);
+        if (!res || res.error || !res.cost) return;
+        var severity = "cheap";
+        if (res.cost.fanoutSites > 0) severity = "fanout";
+        else if (res.cost.recursive) severity = "depth";
+        // Severity precedence: fanout > depth > cheap.
+        if (!worst || severity === "fanout" || (severity === "depth" && worst === "cheap")) {
+          worst = severity;
+        }
+      });
+      if (worst) {
+        node.addClass("cost-" + worst);
+        // Append a small colored badge symbol to the label
+        var badges = {
+          cheap: " ●",    // green dot
+          depth: " ◐",    // amber half-circle (recursion)
+          fanout: " ◆"    // red diamond (fan-out)
+        };
+        var originalLabel = node.data("label");
+        // Only append if not already added
+        if (originalLabel && !originalLabel.match(/[●◐◆]$/)) {
+          node.data("label", originalLabel + badges[worst]);
+        }
+      }
+    });
+  }
+
   // --- Neighbor highlighting -------------------------------------------------
 
   function highlightNeighborhood(cy, ele) {
-    cy.elements().removeClass("perm-affected");
+    cy.elements().removeClass("perm-affected perm-fanout perm-recursive");
     var keep;
     if (ele.isNode()) {
       // The node, its compound descendants/ancestors, its edges and the nodes at
@@ -261,7 +347,7 @@ window.KesselRender = (function () {
 
   function clearFade(cy) {
     cy.elements().removeClass("faded");
-    cy.elements().removeClass("perm-affected");
+    cy.elements().removeClass("perm-affected perm-fanout perm-recursive");
   }
 
   // markSelection flags the clicked permission/reference in the detail panel as
@@ -340,6 +426,9 @@ window.KesselRender = (function () {
   // then `sub` is resolved on the *target* facet, recursing. This surfaces the
   // full chain of relations a permission depends on, not just the direct ones.
   //
+  // Phase B: when a cost provider is present and the clicked item is a permission
+  // (not a single leaf), the affected edges are cost-coloured (recursion/fan-out).
+  //
   // `start` is the clicked permission/reference name on facet `fid`; `startSub`
   // is set only when the clicked leaf was itself a subreference.
   function highlightPermission(cy, fid, tname, start, startSub) {
@@ -410,7 +499,7 @@ window.KesselRender = (function () {
       }
     });
 
-    cy.elements().removeClass("perm-affected");
+    cy.elements().removeClass("perm-affected perm-fanout perm-recursive");
     cy.elements().addClass("faded");
     var node = cy.getElementById(fid);
     var keep = affected
@@ -423,6 +512,54 @@ window.KesselRender = (function () {
       .union(node.ancestors());
     keep.removeClass("faded");
     affected.addClass("perm-affected");
+
+    // Phase B: if this is a permission click (not a leaf) and the cost provider
+    // is present, overlay cost classes on the affected edges based on the proof tree.
+    if (!startSub && typeof window.KesselCost === "function") {
+      var reporter = cy.getElementById(fid).data("reporter");
+      if (reporter) {
+        var provided = window.KesselCost(tname + "." + reporter + "#" + start);
+        if (provided && !provided.error && provided.root) {
+          var roleMap = buildRoleMap(provided.root);
+          affected.forEach(function (edge) {
+            var role = roleMap[edge.data("name")];
+            if (role === "fanout") edge.addClass("perm-fanout");
+            else if (role === "recursive") edge.addClass("perm-recursive");
+          });
+        }
+      }
+    }
+  }
+
+  // buildRoleMap walks a check proof tree and returns a relation-name → role map.
+  // Role is "fanout" for many-cardinality arrows, "recursive" for arrows that
+  // hit a recursion sentinel, else "hop". On name collision, highest severity wins.
+  function buildRoleMap(node) {
+    var map = {};
+    function walk(n) {
+      if (!n || !n.kind) return;
+      if (n.kind === "arrow") {
+        var role = "hop";
+        if (isManyCardinality(n.cardinality)) role = "fanout";
+        else if (n.children && n.children[0] && n.children[0].kind === "recursive") role = "recursive";
+        var prev = map[n.name];
+        if (!prev || role === "fanout" || (role === "recursive" && prev === "hop")) {
+          map[n.name] = role;
+        }
+      }
+      if (n.children) n.children.forEach(walk);
+      if (n.body) walk(n.body);
+      if (n.left) walk(n.left);
+      if (n.right) walk(n.right);
+    }
+    walk(node);
+    return map;
+  }
+
+  // isManyCardinality returns true if cardinality is NOT one of the single-target
+  // values ("ExactlyOne", "AtMostOne"). Mirrors Go isManyCardinality.
+  function isManyCardinality(card) {
+    return card !== "ExactlyOne" && card !== "AtMostOne";
   }
 
   // --- Search / filter -------------------------------------------------------
@@ -502,8 +639,42 @@ window.KesselRender = (function () {
     // Resolve each reference to a relation-or-permission badge so the panel shows
     // what a permission is built on before anything is clicked.
     var scope = cy ? relationScope(cy, d.id, d.typeName) : null;
-    html += section("Permissions", renderPermissions(d.permissions, scope));
+    // A permission's read cost is resolved against a single reporter facet, so
+    // only reporter facets get cost chips — a common permission has no one
+    // reporter to ask the check against.
+    var facet = d.group === "reporter" ? { typeName: d.typeName, reporter: d.reporter } : null;
+    html += section("Permissions", renderPermissions(d.permissions, scope, facet));
     return html;
+  }
+
+  // costChip returns an at-a-glance read-cost badge for a permission, computed by
+  // the WASM analyzer through the window.KesselCost provider the playground
+  // installs after each compile. It is feature-detected: the static page has no
+  // provider, so permissions render without chips there. The colour encodes the
+  // dominant cost driver — fan-out (over a many-relation) is the loudest, then a
+  // hierarchy/recursion walk, then constant-time.
+  function costChip(facet, permName) {
+    if (!facet || !facet.reporter || typeof window.KesselCost !== "function") return "";
+    var res = window.KesselCost(facet.typeName + "." + facet.reporter + "#" + permName);
+    if (!res || res.error || !res.cost) return "";
+    var c = res.cost;
+    var cls = "cheap";
+    if (c.fanoutSites > 0) cls = "fanout";
+    else if (c.recursive) cls = "depth";
+    var tip =
+      c.bigO +
+      " · " + c.dispatchDepth + " hop(s)" +
+      " · " + c.fanoutSites + " fan-out site(s)" +
+      (c.recursive ? " · recursive" : "");
+    return (
+      ' <span class="badge cost ' +
+      cls +
+      '" title="' +
+      esc(tip) +
+      '">' +
+      esc(c.bigO) +
+      "</span>"
+    );
   }
 
   // refKind classifies a reference name against the facet's scope for its badge:
@@ -624,7 +795,9 @@ window.KesselRender = (function () {
   // renderPermissions renders each permission name and its rewrite tree. When a
   // scope is supplied, permission names and reference leaves become clickable
   // (data-perm / data-ref) and each leaf carries a relation/permission badge.
-  function renderPermissions(perms, scope) {
+  // When a reporter `facet` is supplied and a cost provider is present, each
+  // permission name also gets an at-a-glance read-cost chip (see costChip).
+  function renderPermissions(perms, scope, facet) {
     if (!perms || !perms.length) return null;
     return (
       '<div class="members">' +
@@ -637,6 +810,7 @@ window.KesselRender = (function () {
             esc(p.name) +
             '">' +
             esc(p.name) +
+            costChip(facet, p.name) +
             "</div>" +
             renderExpr(p.body, scope) +
             "</div>"

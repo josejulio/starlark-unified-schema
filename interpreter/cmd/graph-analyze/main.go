@@ -1,7 +1,8 @@
 // Command graph-analyze runs graph-theory analyses over a graph.json artifact
-// (see GRAPH.md) and reports structural problems — currently islands: resources
-// disconnected from the rest of the schema. It reads the JSON contract only — it
-// does not touch Starlark.
+// (see GRAPH.md) and reports structural problems. By default it reports islands
+// (resources disconnected from the rest of the schema); with -check it explains
+// the read cost of a single check (object#relation). It reads the JSON contract
+// only — it does not touch Starlark.
 package main
 
 import (
@@ -18,10 +19,35 @@ func main() {
 	in := flag.String("in", "", "path to graph.json (default: stdin)")
 	out := flag.String("out", "", "path to write the report (default: stdout)")
 	format := flag.String("format", "text", "report format: text or json")
+	check := flag.String("check", "", "explain a check's cost: TYPE[.REPORTER]#RELATION (e.g. workspace.features#enabled_services)")
+	paths := flag.String("paths", "", "enumerate reachability paths: TYPE[.REPORTER]#RELATION[@SUBJECTTYPE] (e.g. workspace.rbac#view@user)")
 	flag.Parse()
 
-	// The full report is always emitted first; a non-zero exit signals that the
-	// analysis found structural problems, for CI gating.
+	// -check and -paths are mutually exclusive.
+	if *check != "" && *paths != "" {
+		fmt.Fprintln(os.Stderr, "error: -check and -paths cannot both be set")
+		os.Exit(1)
+	}
+
+	// With -check we explain a single check (never a CI-gating finding).
+	if *check != "" {
+		if err := runCheck(*in, *out, *format, *check); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	// With -paths we enumerate reachability paths.
+	if *paths != "" {
+		if err := runPaths(*in, *out, *format, *paths); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	// Otherwise, the full island report is emitted and a non-zero exit signals a finding.
 	found, err := run(*in, *out, *format)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -30,6 +56,80 @@ func main() {
 	if found {
 		os.Exit(1)
 	}
+}
+
+// runCheck parses the check target, explains it against the graph, and writes the
+// report in the requested format.
+func runCheck(in, out, format, target string) error {
+	data, err := cmdio.Read(in)
+	if err != nil {
+		return err
+	}
+	doc, err := graphdoc.Parse(data)
+	if err != nil {
+		return err
+	}
+
+	object, relation, err := analyze.ParseCheckTarget(target)
+	if err != nil {
+		return err
+	}
+
+	root, err := analyze.ExplainCheck(doc, object, relation)
+	if err != nil {
+		return err
+	}
+
+	var rendered string
+	switch format {
+	case "text":
+		rendered = analyze.FormatCheckText(object, relation, root)
+	case "json":
+		rendered, err = analyze.FormatCheckJSON(root)
+		if err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("unknown format %q (want text or json)", format)
+	}
+	return cmdio.Write(out, []byte(rendered))
+}
+
+// runPaths parses the reach target, enumerates paths against the graph, and writes
+// the report in the requested format.
+func runPaths(in, out, format, target string) error {
+	data, err := cmdio.Read(in)
+	if err != nil {
+		return err
+	}
+	doc, err := graphdoc.Parse(data)
+	if err != nil {
+		return err
+	}
+
+	object, relation, subjectType, err := analyze.ParseReachTarget(target)
+	if err != nil {
+		return err
+	}
+
+	report, err := analyze.Reach(doc, object, relation, subjectType)
+	if err != nil {
+		return err
+	}
+
+	var rendered string
+	switch format {
+	case "text":
+		rendered = analyze.FormatReachText(report)
+	case "json":
+		rendered, err = analyze.FormatReachJSON(report)
+		if err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("unknown format %q (want text or json)", format)
+	}
+	return cmdio.Write(out, []byte(rendered))
 }
 
 // run emits the report and returns whether the analysis found any structural

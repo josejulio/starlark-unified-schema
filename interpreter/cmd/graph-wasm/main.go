@@ -65,12 +65,78 @@ func compile(this js.Value, args []js.Value) (result any) {
 	}
 }
 
+// explainCheck is the JS-facing entry point for check-cost analysis. It takes two
+// arguments — a compiled graph.json string and a "TYPE[.REPORTER]#RELATION"
+// target — and returns an object:
+//
+//	{ ok: true,  check: "<proof-tree json>" }
+//	{ ok: false, error: "<message>" }
+//
+// The proof tree is byte-identical to `graph-analyze -check -format json`, since
+// both call analyze.ExplainCheck via web.ExplainCheck. The playground calls this
+// per permission to annotate the inspector with read cost.
+func explainCheck(this js.Value, args []js.Value) (result any) {
+	defer func() {
+		if r := recover(); r != nil {
+			result = failure(js.ValueOf(r).String())
+		}
+	}()
+
+	if len(args) < 2 || args[0].Type() != js.TypeString || args[1].Type() != js.TypeString {
+		return failure("kesselExplainCheck expects two string arguments: graph.json and TYPE[.REPORTER]#RELATION")
+	}
+
+	check, err := web.ExplainCheck([]byte(args[0].String()), args[1].String())
+	if err != nil {
+		return failure(err.Error())
+	}
+
+	return map[string]any{
+		"ok":    true,
+		"check": string(check),
+	}
+}
+
+// reachPaths is the JS-facing entry point for reachability analysis. It takes two
+// arguments — a compiled graph.json string and a "TYPE[.REPORTER]#RELATION[@SUBJECTTYPE]"
+// target — and returns an object:
+//
+//	{ ok: true,  paths: "<ReachReport json>" }
+//	{ ok: false, error: "<message>" }
+//
+// The report is byte-identical to `graph-analyze -paths -format json`, since both
+// call analyze.Reach via web.Reach. The playground calls this to enumerate grant
+// paths and highlight them on the graph.
+func reachPaths(this js.Value, args []js.Value) (result any) {
+	defer func() {
+		if r := recover(); r != nil {
+			result = failure(js.ValueOf(r).String())
+		}
+	}()
+
+	if len(args) < 2 || args[0].Type() != js.TypeString || args[1].Type() != js.TypeString {
+		return failure("kesselReachPaths expects two string arguments: graph.json and TYPE[.REPORTER]#RELATION[@SUBJECTTYPE]")
+	}
+
+	paths, err := web.Reach([]byte(args[0].String()), args[1].String())
+	if err != nil {
+		return failure(err.Error())
+	}
+
+	return map[string]any{
+		"ok":    true,
+		"paths": string(paths),
+	}
+}
+
 func failure(msg string) map[string]any {
 	return map[string]any{"ok": false, "error": msg}
 }
 
 func main() {
 	js.Global().Set("kesselCompile", js.FuncOf(compile))
-	// Keep the Go runtime alive so the exported function stays callable.
+	js.Global().Set("kesselExplainCheck", js.FuncOf(explainCheck))
+	js.Global().Set("kesselReachPaths", js.FuncOf(reachPaths))
+	// Keep the Go runtime alive so the exported functions stay callable.
 	select {}
 }

@@ -88,7 +88,7 @@ func TestBuildElements(t *testing.T) {
       ],
       "group": "reporter",
       "id": "host__hbi",
-      "label": "hbi",
+      "label": "hbi/host",
       "parent": "host",
       "reporter": "hbi",
       "typeName": "host"
@@ -113,7 +113,7 @@ func TestBuildElements(t *testing.T) {
     "data": {
       "group": "reporter",
       "id": "service__features",
-      "label": "features",
+      "label": "features/service",
       "parent": "service",
       "reporter": "features",
       "typeName": "service"
@@ -139,7 +139,7 @@ func TestBuildElements(t *testing.T) {
     "data": {
       "group": "reporter",
       "id": "workspace__features",
-      "label": "features",
+      "label": "features/workspace",
       "parent": "workspace",
       "permissions": [
         {
@@ -167,7 +167,7 @@ func TestBuildElements(t *testing.T) {
     "data": {
       "group": "reporter",
       "id": "workspace__rbac",
-      "label": "rbac",
+      "label": "rbac/workspace",
       "parent": "workspace",
       "reporter": "rbac",
       "typeName": "workspace"

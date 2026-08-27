@@ -1,4 +1,4 @@
-.PHONY: build-interpreter build-interpreter-debug build-schema build-shipped-schema package-release clean test build-graph-renderer graph build-graph-analyzer graph-analyze build-graph-playground build-graph-wasm graph-playground serve-graph-playground
+.PHONY: build-interpreter build-interpreter-debug build-schema build-shipped-schema package-release clean test build-graph-renderer graph build-graph-analyzer graph-analyze build-graph-playground build-graph-wasm graph-playground serve-graph-playground demo-playground serve-demo-playground
 
 GRAPH_WEB_PORT ?= 8000
 
@@ -89,6 +89,32 @@ graph-playground: build-graph-playground build-graph-wasm
 serve-graph-playground: graph-playground
 	@echo "Serving $(GRAPH_PLAYGROUND_DIR) at http://localhost:$(GRAPH_WEB_PORT)/ (Ctrl-C to stop)"
 	cd "$(GRAPH_PLAYGROUND_DIR)" && python3 -m http.server $(GRAPH_WEB_PORT)
+
+# Build the cost visualization demo playground (standalone, schema-demo/ only).
+# This is a single-file playground showcasing permission cost features.
+# Built in its own directory so it's accessible at the root URL.
+DEMO_DIR ?= output/demo
+
+demo-playground: build-graph-playground build-graph-wasm
+	@echo "Building demo playground from schema-demo/..."
+	mkdir -p "$(DEMO_DIR)"
+	cp "$(GRAPH_PLAYGROUND_DIR)/wasm_exec.js" "$(DEMO_DIR)/"
+	cp "$(GRAPH_PLAYGROUND_DIR)/graph-playground.wasm" "$(DEMO_DIR)/"
+	./bin/graph-playground -src schema-demo -out "$(DEMO_DIR)/index.html"
+	@echo "Demo playground built: $(DEMO_DIR)/index.html"
+	@echo "WASM files copied to $(DEMO_DIR)/"
+	@echo "Serve with: make serve-demo-playground"
+
+# Serve the demo playground at the root URL.
+serve-demo-playground: demo-playground
+	@echo "Serving demo at http://localhost:$(GRAPH_WEB_PORT)/ (Ctrl-C to stop)"
+	@echo ""
+	@echo "Demo features:"
+	@echo "  - Badge icons: ● (cheap), ◐ (recursive), ◆ (fan-out)"
+	@echo "  - Badges stay visible even when nodes are selected"
+	@echo "  - Click permissions to see cost-colored edge overlays"
+	@echo ""
+	cd "$(DEMO_DIR)" && python3 -m http.server $(GRAPH_WEB_PORT)
 
 clean:
 	rm -rf bin/
