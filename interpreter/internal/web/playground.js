@@ -32,6 +32,7 @@
   var statusEl = document.getElementById("status");
   var details = document.getElementById("details");
   var select = document.getElementById("file-select");
+  var modifiedBanner = document.getElementById("modified-banner");
   var cy = null;
   var current = defaultFile(paths);
   var ready = false;
@@ -120,6 +121,7 @@
     current = p;
     rebuildSwitcher();
     loadCurrent();
+    updateModifiedBanner();
     compile();
   }
 
@@ -143,6 +145,7 @@
     current = p;
     rebuildSwitcher();
     loadCurrent();
+    updateModifiedBanner();
     compile();
   }
 
@@ -160,6 +163,7 @@
     current = defaultFile(Object.keys(files).sort());
     rebuildSwitcher();
     loadCurrent();
+    updateModifiedBanner();
     compile();
   }
 
@@ -263,6 +267,7 @@
 
   bootWasm().then(function () {
     ready = true;
+    updateModifiedBanner();
     if (pendingShare) return applyShare(pendingShare);
   }).then(function () {
     // Preload the persisted layout so the first render uses it; fall back to the
@@ -288,6 +293,7 @@
       rebuildSwitcher();
       loadCurrent();
       persistFiles();
+      updateModifiedBanner();
       history.replaceState(null, "", location.pathname + location.search);
     }).catch(function (e) {
       setStatus("err", "Could not decode the shared link: " + String(e && e.message || e));
@@ -322,6 +328,7 @@
     if (!ready || typeof window.kesselCompile !== "function") return;
     saveBuffer();
     persistFiles();
+    updateModifiedBanner();
     setStatus("", "Compiling…");
 
     var res;
@@ -404,6 +411,18 @@
     statusEl.textContent = msg;
   }
 
+  // updateModifiedBanner shows or hides the floating "modified schema" banner
+  // based on whether the current files differ from the seed schema.
+  function updateModifiedBanner() {
+    var delta = computeDelta(seed, files);
+    var isModified = !!(delta.set || delta.del);
+    if (isModified) {
+      modifiedBanner.classList.add("show");
+    } else {
+      modifiedBanner.classList.remove("show");
+    }
+  }
+
   // --- Persistence (Phase 4) -------------------------------------------------
 
   // cloneFiles returns a shallow copy of a { path: source } map (values are
@@ -448,6 +467,8 @@
   }
 
   document.getElementById("reset").addEventListener("click", resetSchema);
+  // Also wire the reset button in the floating banner.
+  modifiedBanner.querySelector(".reset-btn").addEventListener("click", resetSchema);
 
   // resetSchema discards all local edits and restores the shipped schema.
   function resetSchema() {
@@ -457,6 +478,7 @@
     current = defaultFile(Object.keys(files).sort());
     rebuildSwitcher();
     loadCurrent();
+    updateModifiedBanner();
     compile();
   }
 

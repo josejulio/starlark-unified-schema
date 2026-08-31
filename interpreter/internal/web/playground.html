@@ -109,7 +109,48 @@
        Cytoscape's canvas layers otherwise pin #cy at the graph's widest and it
        overflows when the window shrinks or the editor is hidden. render.js then
        calls cy.resize() to follow the reclaimed/released space. */
-    #cy { flex: 1 1 auto; min-width: 0; min-height: 0; height: 100%; background: var(--bg); }
+    #cy { flex: 1 1 auto; min-width: 0; min-height: 0; height: 100%; background: var(--bg); position: relative; }
+
+    /* Floating modified schema banner at top of graph. */
+    #modified-banner {
+      position: absolute;
+      top: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      display: none;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 16px;
+      background: rgba(46, 42, 28, 0.95);
+      border: 1px solid #f0c674;
+      border-radius: 8px;
+      color: #f0c674;
+      font-size: 13px;
+      font-weight: 500;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(8px);
+    }
+    #modified-banner.show { display: flex; }
+    #modified-banner .icon { font-size: 16px; }
+    #modified-banner .msg { flex: 1 1 auto; }
+    #modified-banner .reset-btn {
+      padding: 4px 10px;
+      border-radius: 6px;
+      border: 1px solid #f0c674;
+      background: rgba(240, 198, 116, 0.1);
+      color: #f0c674;
+      cursor: pointer;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      transition: background 0.2s;
+    }
+    #modified-banner .reset-btn:hover {
+      background: rgba(240, 198, 116, 0.2);
+      border-color: #ffd166;
+      color: #ffd166;
+    }
 
     /* Detail panel (shared visual language with the static graph-web page) */
     #panel {
@@ -269,7 +310,13 @@
   </div>
 
   <button id="editor-show" class="iconbtn" title="Show sidebar">»</button>
-  <div id="cy"></div>
+  <div id="cy">
+    <div id="modified-banner">
+      <span class="icon">⚠</span>
+      <span class="msg">Viewing modified schema</span>
+      <button class="reset-btn">Reset to original</button>
+    </div>
+  </div>
 
   <button id="panel-show" class="iconbtn" title="Show panel">«</button>
   <aside id="panel">
