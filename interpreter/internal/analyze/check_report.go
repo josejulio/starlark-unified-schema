@@ -64,7 +64,7 @@ func childrenOf(n *CheckNode) []*CheckNode {
 func nodeLabel(n *CheckNode) string {
 	switch n.Kind {
 	case "permission":
-		return fmt.Sprintf("permission %q on %s.%s", n.Name, n.TypeName, n.Reporter)
+		return fmt.Sprintf("permission %q on %s/%s", n.Name, n.Reporter, n.TypeName)
 	case "relation":
 		return fmt.Sprintf("relation %q (%s)", n.Name, graphdoc.Multiplicity(n.Cardinality))
 	case "op":
@@ -73,10 +73,10 @@ func nodeLabel(n *CheckNode) string {
 		if len(n.Children) == 0 {
 			return fmt.Sprintf("%s → %s [%s]", n.Name, n.Sub, n.Note)
 		}
-		return fmt.Sprintf("%s (%s) → %s.%s ⇒ %s",
-			n.Name, graphdoc.Multiplicity(n.Cardinality), n.TargetType, n.TargetReporter, n.Sub)
+		return fmt.Sprintf("%s (%s) → %s/%s ⇒ %s",
+			n.Name, graphdoc.Multiplicity(n.Cardinality), n.TargetReporter, n.TargetType, n.Sub)
 	case "recursive":
-		return fmt.Sprintf("↺ %s on %s.%s (recursion)", n.Name, n.TypeName, n.Reporter)
+		return fmt.Sprintf("↺ %s on %s/%s (recursion)", n.Name, n.Reporter, n.TypeName)
 	case "unresolved":
 		return fmt.Sprintf("%s (unresolved: %s)", n.Name, n.Note)
 	default:

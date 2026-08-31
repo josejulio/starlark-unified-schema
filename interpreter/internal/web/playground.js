@@ -358,13 +358,17 @@
     // the playground (the static page has no provider and shows none).
     window.KesselCost = makeCostProvider(res.graph);
 
+    // Install the reachability check provider and populate the dropdowns.
+    window.KesselReach = makeReachProvider(res.graph);
+    populateReachControls(res.graph);
+
     render(elements);
     var counts = countElements(elements);
     setStatus("ok", "Compiled ✓  " + counts.types + " types, " + counts.edges + " edges.");
   }
 
   // makeCostProvider returns a function that explains a check target
-  // ("TYPE.REPORTER#RELATION") against the given compiled graph via the WASM
+  // ("REPORTER/TYPE#RELATION") against the given compiled graph via the WASM
   // analyzer, returning { cost, root } or { error }. It closes over the graph so
   // each compile refreshes the costs the inspector shows.
   function makeCostProvider(graph) {
@@ -385,6 +389,181 @@
       }
     };
   }
+
+  // makeReachProvider returns a function that verifies structural reachability
+  // against the given compiled graph via the WASM analyzer, returning the verdict
+  // or { error }. It closes over the graph so each compile refreshes it.
+  function makeReachProvider(graph) {
+    return function (target) {
+      if (typeof window.kesselCheckReach !== "function") return null;
+      var res;
+      try {
+        res = window.kesselCheckReach(graph, target);
+      } catch (e) {
+        return { error: String((e && e.message) || e) };
+      }
+      if (!res || !res.ok) return { error: (res && res.error) || "reach check failed" };
+      try {
+        return JSON.parse(res.reach);
+      } catch (e) {
+        return { error: "invalid reach JSON: " + e.message };
+      }
+    };
+  }
+
+  // populateReachControls extracts facets and relations from the compiled graph
+  // and populates the reach dropdowns.
+  function populateReachControls(graphJSON) {
+    var graph;
+    try {
+      graph = JSON.parse(graphJSON);
+    } catch (e) {
+      return;
+    }
+
+    // Collect all facets (object and subject candidates)
+    var facets = [];
+    if (graph.nodes) {
+      graph.nodes.forEach(function (n) {
+        if (n.reporters) {
+          Object.keys(n.reporters).forEach(function (rep) {
+            facets.push({ type: n.typeName, reporter: rep });
+          });
+        }
+      });
+    }
+    facets.sort(function (a, b) {
+      var cmp = a.type.localeCompare(b.type);
+      return cmp !== 0 ? cmp : a.reporter.localeCompare(b.reporter);
+    });
+
+    // Populate object dropdown
+    var objectSel = document.getElementById("reach-object");
+    objectSel.innerHTML = '<option value="">Select object facet…</option>';
+    facets.forEach(function (f) {
+      var opt = document.createElement("option");
+      opt.value = f.reporter + "/" + f.type;
+      opt.textContent = f.reporter + "/" + f.type;
+      objectSel.appendChild(opt);
+    });
+
+    // Populate subject dropdown (same list)
+    var subjectSel = document.getElementById("reach-subject");
+    subjectSel.innerHTML = '<option value="">Select subject facet…</option>';
+    facets.forEach(function (f) {
+      var opt = document.createElement("option");
+      opt.value = f.reporter + "/" + f.type;
+      opt.textContent = f.reporter + "/" + f.type;
+      subjectSel.appendChild(opt);
+    });
+
+    // Relation dropdown is populated when object changes
+    document.getElementById("reach-relation").disabled = true;
+    document.getElementById("reach-relation").innerHTML = '<option value="">Select relation…</option>';
+  }
+
+  // --- Reachability check controls -------------------------------------------
+
+  (function wireReachControls() {
+    var objectSel = document.getElementById("reach-object");
+    var relationSel = document.getElementById("reach-relation");
+    var subjectSel = document.getElementById("reach-subject");
+    var checkBtn = document.getElementById("reach-check");
+    var resultsDiv = document.getElementById("reach-results");
+
+    // When object changes, populate relations in scope
+    objectSel.addEventListener("change", function () {
+      relationSel.innerHTML = '<option value="">Select relation…</option>';
+      relationSel.disabled = true;
+      updateCheckButton();
+
+      if (!objectSel.value) return;
+
+      var parts = objectSel.value.split("/");
+      if (parts.length !== 2) return;
+      var reporter = parts[0], typeName = parts[1];
+
+      // Get relations in scope using render.js helper
+      if (cy && typeof KesselRender.relationScope === "function") {
+        var facetId = typeName + "__" + reporter;
+        var scope = KesselRender.relationScope(cy, facetId, typeName);
+        var names = [];
+        Object.keys(scope.edgeByName || {}).forEach(function (name) { names.push(name); });
+        Object.keys(scope.permByName || {}).forEach(function (name) { names.push(name); });
+        names.sort();
+        names.forEach(function (name) {
+          var opt = document.createElement("option");
+          opt.value = name;
+          opt.textContent = name;
+          relationSel.appendChild(opt);
+        });
+        if (names.length > 0) relationSel.disabled = false;
+      }
+    });
+
+    relationSel.addEventListener("change", updateCheckButton);
+    subjectSel.addEventListener("change", updateCheckButton);
+
+    function updateCheckButton() {
+      checkBtn.disabled = !(objectSel.value && relationSel.value && subjectSel.value);
+    }
+
+    checkBtn.addEventListener("click", function () {
+      if (!window.KesselReach) {
+        showReachResults({ error: "Reach provider not available" });
+        return;
+      }
+
+      var target = objectSel.value + "#" + relationSel.value + "@" + subjectSel.value;
+      var result = window.KesselReach(target);
+      showReachResults(result);
+
+      // Highlight paths on the graph
+      if (result && !result.error && result.paths && cy) {
+        KesselRender.highlightReachPaths(cy, result.paths);
+      }
+    });
+
+    function showReachResults(result) {
+      resultsDiv.classList.remove("show", "reachable", "exclusion-only", "unreachable");
+
+      if (result.error) {
+        resultsDiv.className = "unreachable show";
+        resultsDiv.innerHTML = '<div class="verdict">Error: ' + escapeHtml(result.error) + '</div>';
+        return;
+      }
+
+      resultsDiv.classList.add("show", result.verdict);
+      var verdictText = result.verdict === "reachable" ? "✓ Path exists" :
+                        result.verdict === "exclusion-only" ? "⚠ Only via an exclusion (unless) branch" :
+                        "✗ No path — schema does not support this check";
+
+      var html = '<div class="verdict">' + verdictText + '</div>';
+      if (result.paths && result.paths.length > 0) {
+        html += '<div class="paths">';
+        result.paths.forEach(function (p, i) {
+          var label = p.excluded ? "Exclusion path " + (i + 1) : "Grant path " + (i + 1);
+          html += '<div class="path"><div class="path-label">' + label + ':</div>';
+          p.hops.forEach(function (hop) {
+            html += hop.fromType + "." + hop.fromReporter + " —" + hop.relation + "→ ";
+          });
+          if (p.hops.length > 0) {
+            var last = p.hops[p.hops.length - 1];
+            html += last.toType + "." + last.toReporter;
+          }
+          html += '</div>';
+        });
+        html += '</div>';
+      }
+      resultsDiv.innerHTML = html;
+    }
+
+    function escapeHtml(str) {
+      var div = document.createElement("div");
+      div.textContent = str;
+      return div.innerHTML;
+    }
+  })();
 
   function render(elements) {
     if (cy) cy.destroy();

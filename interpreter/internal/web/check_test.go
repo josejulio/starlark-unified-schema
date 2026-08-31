@@ -11,7 +11,7 @@ import (
 // compiled graph and returns the annotated proof tree as JSON — the same result
 // the CLI produces, since both call analyze.ExplainCheck.
 func TestExplainCheck(t *testing.T) {
-	out, err := ExplainCheck(fixture, "workspace.features#view")
+	out, err := ExplainCheck(fixture, "features/workspace#view")
 	require.NoError(t, err)
 
 	var root struct {
@@ -35,9 +35,9 @@ func TestExplainCheck(t *testing.T) {
 // TestExplainCheckErrors surfaces both target-syntax and resolution failures to
 // the caller (the browser) rather than panicking.
 func TestExplainCheckErrors(t *testing.T) {
-	_, err := ExplainCheck(fixture, "workspace.features")
-	require.ErrorContains(t, err, "TYPE[.REPORTER]#RELATION")
+	_, err := ExplainCheck(fixture, "features/workspace")
+	require.ErrorContains(t, err, "REPORTER/TYPE#RELATION")
 
-	_, err = ExplainCheck(fixture, "workspace.features#does_not_exist")
+	_, err = ExplainCheck(fixture, "features/workspace#does_not_exist")
 	require.ErrorContains(t, err, "neither a permission nor a relation")
 }

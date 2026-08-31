@@ -66,8 +66,8 @@ func compile(this js.Value, args []js.Value) (result any) {
 }
 
 // explainCheck is the JS-facing entry point for check-cost analysis. It takes two
-// arguments — a compiled graph.json string and a "TYPE[.REPORTER]#RELATION"
-// target — and returns an object:
+// arguments — a compiled graph.json string and a "REPORTER/TYPE#RELATION" (or
+// "TYPE#RELATION" when unambiguous) target — and returns an object:
 //
 //	{ ok: true,  check: "<proof-tree json>" }
 //	{ ok: false, error: "<message>" }
@@ -83,7 +83,7 @@ func explainCheck(this js.Value, args []js.Value) (result any) {
 	}()
 
 	if len(args) < 2 || args[0].Type() != js.TypeString || args[1].Type() != js.TypeString {
-		return failure("kesselExplainCheck expects two string arguments: graph.json and TYPE[.REPORTER]#RELATION")
+		return failure("kesselExplainCheck expects two string arguments: graph.json and REPORTER/TYPE#RELATION")
 	}
 
 	check, err := web.ExplainCheck([]byte(args[0].String()), args[1].String())
@@ -97,6 +97,38 @@ func explainCheck(this js.Value, args []js.Value) (result any) {
 	}
 }
 
+// checkReachable is the JS-facing entry point for reachability verification. It
+// takes two arguments — a compiled graph.json string and a
+// "REPORTER/TYPE#RELATION@REPORTER/TYPE" target — and returns an object:
+//
+//	{ ok: true,  reach: "<verdict json>" }
+//	{ ok: false, error: "<message>" }
+//
+// The verdict is byte-identical to `graph-analyze -reach -format json`, since both
+// call analyze.CheckReachable via web.CheckReachable. The playground uses this to
+// verify and highlight reachability paths.
+func checkReachable(this js.Value, args []js.Value) (result any) {
+	defer func() {
+		if r := recover(); r != nil {
+			result = failure(js.ValueOf(r).String())
+		}
+	}()
+
+	if len(args) < 2 || args[0].Type() != js.TypeString || args[1].Type() != js.TypeString {
+		return failure("kesselCheckReach expects two string arguments: graph.json and REPORTER/TYPE#RELATION@REPORTER/TYPE")
+	}
+
+	reach, err := web.CheckReachable([]byte(args[0].String()), args[1].String())
+	if err != nil {
+		return failure(err.Error())
+	}
+
+	return map[string]any{
+		"ok":    true,
+		"reach": string(reach),
+	}
+}
+
 func failure(msg string) map[string]any {
 	return map[string]any{"ok": false, "error": msg}
 }
@@ -104,6 +136,7 @@ func failure(msg string) map[string]any {
 func main() {
 	js.Global().Set("kesselCompile", js.FuncOf(compile))
 	js.Global().Set("kesselExplainCheck", js.FuncOf(explainCheck))
+	js.Global().Set("kesselCheckReach", js.FuncOf(checkReachable))
 	// Keep the Go runtime alive so the exported functions stay callable.
 	select {}
 }

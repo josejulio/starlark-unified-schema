@@ -28,7 +28,13 @@ type FacetRef struct {
 	Reporter string
 }
 
-func (f FacetRef) String() string { return f.TypeName + "." + f.Reporter }
+// String returns the canonical REPORTER/TYPE notation (e.g., "features/workspace").
+func (f FacetRef) String() string {
+	if f.Reporter == "" {
+		return f.TypeName
+	}
+	return f.Reporter + "/" + f.TypeName
+}
 
 // CostVar is a symbolic quantity a check's cost depends on: a hierarchy depth or
 // a per-relation fan-out that only concrete data can fix to a number.
@@ -232,7 +238,7 @@ func ExplainCheck(doc graphdoc.Document, object FacetRef, relation string) (*Che
 	case object.Reporter == "" && len(reps) == 1:
 		object.Reporter = reps[0]
 	case object.Reporter == "":
-		return nil, fmt.Errorf("resource %q has multiple reporters (%s); specify one as TYPE.REPORTER", object.TypeName, strings.Join(reps, ", "))
+		return nil, fmt.Errorf("resource %q has multiple reporters (%s); specify one as REPORTER/TYPE", object.TypeName, strings.Join(reps, ", "))
 	default:
 		if !contains(reps, object.Reporter) {
 			return nil, fmt.Errorf("resource %q has no reporter %q (have: %s)", object.TypeName, object.Reporter, strings.Join(reps, ", "))
@@ -251,7 +257,11 @@ func ExplainCheck(doc graphdoc.Document, object FacetRef, relation string) (*Che
 // is unresolved.
 func (r *checkResolver) resolveOn(f FacetRef, name string, path map[string]bool) *CheckNode {
 	if e, ok := r.relIn(f)[name]; ok {
-		n := &CheckNode{Kind: "relation", TypeName: f.TypeName, Reporter: f.Reporter, Name: name, Cardinality: e.Cardinality}
+		n := &CheckNode{
+			Kind: "relation", TypeName: f.TypeName, Reporter: f.Reporter,
+			Name: name, Cardinality: e.Cardinality,
+			TargetType: e.Target, TargetReporter: e.TargetReporter, // NEW (additive JSON)
+		}
 		n.expr = constExpr()
 		return n.finalize()
 	}
@@ -398,26 +408,76 @@ func (r *checkResolver) depthVar(e graphdoc.Edge, source string) CostVar {
 	}
 }
 
-// ParseCheckTarget splits "TYPE[.REPORTER]#RELATION" into the object facet and
-// relation a check is asked against. It is shared by the CLI and the WASM wrapper
-// so both accept the same target syntax.
+// ParseCheckTarget splits "REPORTER/TYPE#RELATION" (or "TYPE#RELATION" when a
+// type has only one reporter) into the object facet and relation a check is asked
+// against. It is shared by the CLI and the WASM wrapper so both accept the same
+// target syntax. The format uses REPORTER/TYPE to mirror how services are
+// organized: the reporter (service provider like "rbac" or "features") owns the
+// type definition (resource like "workspace").
 func ParseCheckTarget(s string) (FacetRef, string, error) {
 	hash := strings.LastIndex(s, "#")
 	if hash < 0 {
-		return FacetRef{}, "", fmt.Errorf("check target %q must be TYPE[.REPORTER]#RELATION", s)
+		return FacetRef{}, "", fmt.Errorf("check target %q must be REPORTER/TYPE#RELATION or TYPE#RELATION", s)
 	}
 	left, relation := s[:hash], s[hash+1:]
 	if relation == "" {
 		return FacetRef{}, "", fmt.Errorf("check target %q is missing a relation after '#'", s)
 	}
-	ref := FacetRef{TypeName: left}
-	if dot := strings.Index(left, "."); dot >= 0 {
-		ref.TypeName, ref.Reporter = left[:dot], left[dot+1:]
+
+	// Parse REPORTER/TYPE or just TYPE (when unambiguous)
+	var typeName, reporter string
+	if slash := strings.Index(left, "/"); slash >= 0 {
+		reporter, typeName = left[:slash], left[slash+1:]
+		if reporter == "" || typeName == "" {
+			return FacetRef{}, "", fmt.Errorf("check target %q: REPORTER/TYPE format requires both parts", s)
+		}
+	} else {
+		typeName = left
 	}
-	if ref.TypeName == "" {
+
+	if typeName == "" {
 		return FacetRef{}, "", fmt.Errorf("check target %q is missing a resource type", s)
 	}
-	return ref, relation, nil
+	return FacetRef{TypeName: typeName, Reporter: reporter}, relation, nil
+}
+
+// ParseReachTarget splits "REPORTER/TYPE#RELATION@REPORTER/TYPE" into object,
+// relation, and subject. Subject is REQUIRED and must name a full facet
+// (REPORTER/TYPE).
+func ParseReachTarget(s string) (object FacetRef, relation string, subject FacetRef, err error) {
+	at := strings.LastIndex(s, "@")
+	if at < 0 {
+		err = fmt.Errorf("reach target %q must be REPORTER/TYPE#RELATION@REPORTER/TYPE (subject required)", s)
+		return
+	}
+	left, subjectStr := s[:at], s[at+1:]
+	if subjectStr == "" {
+		err = fmt.Errorf("reach target %q is missing a subject after '@'", s)
+		return
+	}
+	if !strings.Contains(subjectStr, "/") {
+		err = fmt.Errorf("reach target %q: subject must be a full facet (REPORTER/TYPE)", s)
+		return
+	}
+
+	object, relation, err = ParseCheckTarget(left)
+	if err != nil {
+		return
+	}
+
+	// Parse subject as REPORTER/TYPE
+	slash := strings.Index(subjectStr, "/")
+	if slash < 0 || slash == 0 || slash == len(subjectStr)-1 {
+		err = fmt.Errorf("reach target %q: subject %q must be REPORTER/TYPE", s, subjectStr)
+		return
+	}
+	reporter, typeName := subjectStr[:slash], subjectStr[slash+1:]
+	if reporter == "" || typeName == "" {
+		err = fmt.Errorf("reach target %q: subject %q must be REPORTER/TYPE", s, subjectStr)
+		return
+	}
+	subject = FacetRef{TypeName: typeName, Reporter: reporter}
+	return
 }
 
 func contains(s []string, v string) bool {

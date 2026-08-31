@@ -22,6 +22,33 @@ rewrite logic carried on each node.
 It is produced by `GraphVisitor` (`interpreter/internal/output/graph.go`), a
 `SchemaVisitor` implementation, and written to `$GRAPH_OUTPUT_DIR/graph.json`.
 
+## Notation convention: REPORTER/TYPE
+
+Throughout this document and the CLI tools, **facets** (a reporter's view of a
+resource type) are written as `REPORTER/TYPE` — for example, `features/workspace`
+or `rbac/workspace`. This mirrors how the schema is organized: the **reporter**
+(service provider like `rbac`, `features`, or `hbi`) owns the type definition
+(resource like `workspace`, `host`, or `billing_account`).
+
+- **Reporter** (left of `/`) — the service that provides this facet, e.g.,
+  `features`, `rbac`, `hbi`. This maps to the Starlark `reporter="..."` attribute.
+- **Type** (right of `/`) — the resource type, e.g., `workspace`, `host`,
+  `billing_account`. This maps to the Starlark `resource(...)` call.
+
+**Examples:**
+- `features/workspace` — the `features` reporter's facet of the `workspace` type
+- `rbac/workspace` — the `rbac` reporter's facet of the `workspace` type
+- `hbi/host` — the `hbi` reporter's facet of the `host` type
+
+**When a type has only one reporter**, the reporter can be omitted in commands
+(e.g., `workspace#view` if `workspace` has only one reporter), but the full
+`REPORTER/TYPE` form is always accepted and recommended for clarity.
+
+**In check and reach commands**, targets use this convention:
+- Check cost: `REPORTER/TYPE#RELATION` (e.g., `features/workspace#enabled_services`)
+- Reachability: `REPORTER/TYPE#RELATION@REPORTER/TYPE` (e.g.,
+  `features/workspace#direct_billing_account@features/billing_account`)
+
 ## Top-level shape
 
 ```json
@@ -303,27 +330,28 @@ Output is a text report by default (`-format json` for programmatic consumers).
 
 ### Check cost
 
-`graph-analyze -check TYPE[.REPORTER]#RELATION` explains the **read cost of a
-single check** — the `object#relation@subject` query that inventory-api's
+`graph-analyze -check REPORTER/TYPE#RELATION` (or `TYPE#RELATION` when the type
+has only one reporter) explains the **read cost of a single check** — the
+`object#relation@subject` query that inventory-api's
 [`CheckRequest`](https://buf.build/project-kessel/inventory-api/docs/main:kessel.inventory.v1beta2#kessel.inventory.v1beta2.CheckRequest)
 carries (`object` = a reporter facet, `relation` = one named permission-or-relation,
 `subject` = a subject or subject-set). It walks the permission rewrite from the
 object down the relation topology and returns a **proof tree** annotated with cost:
 
 ```
-$ graph-analyze -in graph.json -check workspace.features#enabled_services
+$ graph-analyze -in graph.json -check features/workspace#enabled_services
 Cost:      O(D_workspace)
 Depth:     1 sequential hop(s)   Fan-out sites: 0   Recursive: true
 
-permission "enabled_services" on workspace.features    O(D_workspace)
+permission "enabled_services" on features/workspace    O(D_workspace)
 └─ AND    O(D_workspace)
-   ├─ permission "_paid_services" on workspace.features    O(D_workspace)
+   ├─ permission "_paid_services" on features/workspace    O(D_workspace)
    │  └─ OR    O(D_workspace)
-   │     ├─ direct_billing_account (0..1) → billing_account.features ⇒ services    O(1)
+   │     ├─ direct_billing_account (0..1) → features/billing_account ⇒ services    O(1)
    │     │  └─ relation "services" (*)    O(1)
-   │     └─ parent (0..1) → workspace.features ⇒ _paid_services    O(D_workspace)
-   │        └─ ↺ _paid_services on workspace.features (recursion)    O(1)
-   └─ permission "_desired_services" on workspace.features    O(D_workspace)
+   │     └─ parent (0..1) → features/workspace ⇒ _paid_services    O(D_workspace)
+   │        └─ ↺ _paid_services on features/workspace (recursion)    O(1)
+   └─ permission "_desired_services" on features/workspace    O(D_workspace)
       └─ …
 ```
 
@@ -379,6 +407,85 @@ reporter facet is bordered by the worst permission cost it carries (green/amber/
 heatmap), and clicking a permission overlays its proof-tree edges with cost-coloured
 roles (recursion/fan-out), so the shape and expense of a rewrite are immediately
 visible.
+
+### Check reachability
+
+`graph-analyze -reach REPORTER/TYPE#RELATION@REPORTER/TYPE` verifies **structural
+reachability** — whether the schema wiring needed to satisfy
+`object#relation@subject` exists. It walks the permission rewrite from
+`object#relation` down the relation topology (via the same proof tree
+`ExplainCheck` builds) and reports whether at least one path terminates at a
+relation whose target is `subject`:
+
+```
+$ graph-analyze -in graph.json -reach features/workspace#direct_billing_account@features/billing_account
+✓ reachable
+
+Grant path(s): 1
+  Path 1:
+    features/workspace
+      --direct_billing_account 0..1--> features/billing_account
+```
+
+This is a **purely static property** of the schema graph + rewrite trees — it uses
+no instance data and no IDs. We are not replicating the resolver's evaluation; we
+are verifying that the structure required to complete the query successfully is
+present. **"No path exists" is a first-class answer** — that is how a schema
+author learns the schema does not support an intended check.
+
+**Subject granularity = full facet.** A leaf matches only when **both** the target
+type **and** the target reporter equal the subject facet. Relation-edge targets
+always carry a resolved `TargetReporter` in `graph.json`, so even subject-only
+types like `user` appear as `<reporter>/user` facets and must be matched exactly.
+
+**Traverse all branches; tag exclusions.** The analysis walks both operands of
+`and`, `or`, **and `unless`** — we are verifying that wiring *exists*, not
+evaluating truth. A witness path that reaches `subject` only by descending into
+the **right operand of an `unless`** (the exclusion/deny side) is recorded but
+**flagged as an exclusion path**. The wiring is present, but reaching the subject
+there means it would be *denied*, not granted.
+
+**Verdict tiers** derived from the witnesses:
+
+| Verdict          | Condition                                                      |
+| ---------------- | ------------------------------------------------------------- |
+| `reachable`      | ≥1 witness path with `Excluded == false` (a real grant path) |
+| `exclusion-only` | no grant witness, but ≥1 witness with `Excluded == true`      |
+| `unreachable`    | no witness path at all                                        |
+
+**Recursion is sound to treat as a dead-end for witnesses.** `ExplainCheck` cuts a
+rewrite cycle with a `recursive` sentinel node keyed by `facet#name`. A
+`recursive` node re-enters a permission **already expanded higher on the path**,
+so it introduces **no new subject facet** — every subject facet reachable through
+the cycle was already discovered before the cut (the guard only fires on a true
+`facet#name` repeat; distinct facets in a hierarchy are expanded until they
+repeat). Therefore, for witness extraction, a `recursive` node emits **no
+terminal**.
+
+**CLI and WASM parity.** The **same** analysis runs in the browser:
+`cmd/graph-wasm` exports a `kesselCheckReach(graph, "REPORTER/TYPE#RELATION@REPORTER/TYPE")`
+global that calls `web.CheckReachable` → `analyze.CheckReachable`, so a reach
+check in the playground is byte-identical to `graph-analyze -reach -format json`.
+The playground installs it as a reach provider after each compile and the
+**Check reachability** panel uses it to verify and highlight paths on the graph.
+
+**Graph encoding.** Witness paths are highlighted on the graph:
+
+- **`.reach-path`** (green, solid) — an edge on at least one grant (non-excluded)
+  witness.
+- **`.reach-exclusion`** (amber, dashed) — an edge appearing **only** on exclusion
+  witnesses.
+
+The rest of the graph is dimmed. Inheritance edges from the object facet remain
+visible (as with permission highlighting) so borrowed relations read as connected.
+
+**Limitations inherited from the cost model:**
+
+- **One-target-per-relation**: a `typeUnion` target is not expanded, so paths
+  through it are missed.
+- **Subject-set expansion treated as a leaf match**: the subject is matched against
+  the target of a relation leaf, not expanded further (this is a structural
+  property; subject-set expansion is instance-dependent).
 
 ## Known limitations (v1)
 

@@ -170,6 +170,26 @@ window.KesselRender = (function () {
             "width": 4.5,
           },
         },
+        // Reachability path highlighting — grant paths and exclusion-only paths.
+        {
+          selector: "edge.reach-path",
+          style: {
+            "line-color": "#4bbf8a",
+            "target-arrow-color": "#4bbf8a",
+            "width": 3.5,
+            "z-index": 10,
+          },
+        },
+        {
+          selector: "edge.reach-exclusion",
+          style: {
+            "line-color": "#f0c674",
+            "target-arrow-color": "#f0c674",
+            "width": 3.5,
+            "line-style": "dashed",
+            "z-index": 10,
+          },
+        },
       ],
       layout: layoutOptions(opts.layoutName || "dagre"),
     });
@@ -298,7 +318,7 @@ window.KesselRender = (function () {
       var reporter = node.data("reporter");
       var worst = null; // null | "cheap" | "depth" | "fanout"
       perms.forEach(function (p) {
-        var res = window.KesselCost(typeName + "." + reporter + "#" + p.name);
+        var res = window.KesselCost(reporter + "/" + typeName + "#" + p.name);
         if (!res || res.error || !res.cost) return;
         var severity = "cheap";
         if (res.cost.fanoutSites > 0) severity = "fanout";
@@ -518,7 +538,7 @@ window.KesselRender = (function () {
     if (!startSub && typeof window.KesselCost === "function") {
       var reporter = cy.getElementById(fid).data("reporter");
       if (reporter) {
-        var provided = window.KesselCost(tname + "." + reporter + "#" + start);
+        var provided = window.KesselCost(reporter + "/" + tname + "#" + start);
         if (provided && !provided.error && provided.root) {
           var roleMap = buildRoleMap(provided.root);
           affected.forEach(function (edge) {
@@ -655,7 +675,7 @@ window.KesselRender = (function () {
   // hierarchy/recursion walk, then constant-time.
   function costChip(facet, permName) {
     if (!facet || !facet.reporter || typeof window.KesselCost !== "function") return "";
-    var res = window.KesselCost(facet.typeName + "." + facet.reporter + "#" + permName);
+    var res = window.KesselCost(facet.reporter + "/" + facet.typeName + "#" + permName);
     if (!res || res.error || !res.cost) return "";
     var c = res.cost;
     var cls = "cheap";
@@ -891,5 +911,51 @@ window.KesselRender = (function () {
       .replace(/"/g, "&quot;");
   }
 
-  return { create: create, esc: esc, layoutOptions: layoutOptions };
+  // highlightReachPaths highlights witness paths on the graph. Each hop in each
+  // path is resolved to an edge and highlighted green (grant) or amber (exclusion).
+  function highlightReachPaths(cy, paths) {
+    cy.elements().removeClass("perm-affected perm-fanout perm-recursive reach-path reach-exclusion");
+    if (!paths || !paths.length) return;
+
+    var grantEdges = cy.collection();
+    var exclusionEdges = cy.collection();
+
+    paths.forEach(function (path) {
+      path.hops.forEach(function (hop) {
+        var facetId = hop.fromType + "__" + hop.fromReporter;
+        var scope = relationScope(cy, facetId, hop.fromType);
+        var edges = scope.edgeByName[hop.relation];
+        if (edges && edges.length > 0) {
+          if (path.excluded) {
+            exclusionEdges = exclusionEdges.union(edges);
+          } else {
+            grantEdges = grantEdges.union(edges);
+          }
+        }
+      });
+    });
+
+    // Grant paths take precedence: if an edge appears in both, show it as grant
+    var pureExclusion = exclusionEdges.difference(grantEdges);
+
+    var keep = grantEdges
+      .union(pureExclusion)
+      .union(grantEdges.connectedNodes())
+      .union(pureExclusion.connectedNodes())
+      .union(grantEdges.connectedNodes().ancestors())
+      .union(pureExclusion.connectedNodes().ancestors());
+
+    cy.elements().addClass("faded");
+    keep.removeClass("faded");
+    grantEdges.addClass("reach-path");
+    pureExclusion.addClass("reach-exclusion");
+  }
+
+  return {
+    create: create,
+    esc: esc,
+    layoutOptions: layoutOptions,
+    relationScope: relationScope,
+    highlightReachPaths: highlightReachPaths
+  };
 })();

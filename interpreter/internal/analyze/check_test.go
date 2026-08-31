@@ -60,8 +60,8 @@ func TestExplainCheckRealSchema(t *testing.T) {
 	// The text report renders headline + tree + variables.
 	text := FormatCheckText(FacetRef{"workspace", "features"}, "enabled_services", root)
 	require.Contains(t, text, "Cost:      O(D_workspace)")
-	require.Contains(t, text, `permission "enabled_services" on workspace.features`)
-	require.Contains(t, text, "↺ _paid_services on workspace.features (recursion)")
+	require.Contains(t, text, `permission "enabled_services" on features/workspace`)
+	require.Contains(t, text, "↺ _paid_services on features/workspace (recursion)")
 	require.Contains(t, text, "D_workspace")
 }
 

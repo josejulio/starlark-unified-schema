@@ -191,6 +191,33 @@
       border: 1px solid var(--border); background: #0f1115; color: var(--text); font: inherit; font-size: 12px;
     }
     #layout-select:focus { outline: none; border-color: var(--accent); }
+    /* Reachability check controls */
+    #reach-section { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+    #reach-section h2 { margin-bottom: 10px; }
+    #reach-controls { display: grid; gap: 8px; margin-bottom: 10px; }
+    #reach-controls select {
+      width: 100%; padding: 6px 8px; border-radius: 6px;
+      border: 1px solid var(--border); background: #0f1115; color: var(--text); font: inherit; font-size: 12px;
+    }
+    #reach-controls select:focus { outline: none; border-color: var(--accent); }
+    #reach-controls select:disabled { opacity: 0.5; cursor: not-allowed; }
+    #reach-check {
+      padding: 7px 14px; border-radius: 6px;
+      border: 1px solid var(--border); background: #223; color: var(--accent);
+      cursor: pointer; font: inherit; font-weight: 600;
+    }
+    #reach-check:hover:not(:disabled) { border-color: var(--accent); }
+    #reach-check:disabled { opacity: 0.5; cursor: not-allowed; }
+    #reach-results { margin-top: 10px; padding: 10px; border-radius: 6px; display: none; }
+    #reach-results.show { display: block; }
+    #reach-results.reachable { background: rgba(75, 191, 138, 0.15); border: 1px solid #4bbf8a; color: #4bbf8a; }
+    #reach-results.exclusion-only { background: rgba(240, 198, 116, 0.15); border: 1px solid #f0c674; color: #f0c674; }
+    #reach-results.unreachable { background: rgba(255, 107, 107, 0.15); border: 1px solid #ff6b6b; color: #ff6b6b; }
+    #reach-results .verdict { font-weight: 600; margin-bottom: 8px; }
+    #reach-results .paths { font-size: 11px; line-height: 1.6; }
+    #reach-results .path { margin-top: 6px; padding-left: 8px; border-left: 2px solid currentColor; opacity: 0.8; }
+    #reach-results .path-label { font-weight: 600; }
+
     /* Phase 4 actions: share / reset / downloads. */
     #actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
     .act {
@@ -341,6 +368,24 @@
       <button id="reset" class="act" title="Discard edits and restore the shipped schema">↺ Reset</button>
       <button class="act" data-dl="png" title="Save the current graph as a PNG image">⬇ Export diagram as PNG</button>
     </div>
+
+    <div id="reach-section">
+      <h2>Check reachability</h2>
+      <div id="reach-controls">
+        <select id="reach-object" title="Object facet (TYPE.REPORTER)">
+          <option value="">Select object facet…</option>
+        </select>
+        <select id="reach-relation" title="Relation or permission" disabled>
+          <option value="">Select relation…</option>
+        </select>
+        <select id="reach-subject" title="Subject facet (TYPE.REPORTER)">
+          <option value="">Select subject facet…</option>
+        </select>
+        <button id="reach-check" disabled>Check</button>
+      </div>
+      <div id="reach-results"></div>
+    </div>
+
     <div id="details"><p class="empty">Nothing selected.</p></div>
     <div id="legend">
       <h2>Legend</h2>
@@ -362,6 +407,11 @@
         <div class="mult-title">Permission overlay (on click)</div>
         <div class="row"><span class="line" style="border-top:3px dashed #f0c674"></span> recursion hop</div>
         <div class="row"><span class="line" style="border-top:4.5px solid #ff6b6b"></span> fan-out hop</div>
+      </div>
+      <div class="mult">
+        <div class="mult-title">Reachability paths</div>
+        <div class="row"><span class="line" style="border-top:3.5px solid #4bbf8a"></span> grant path</div>
+        <div class="row"><span class="line" style="border-top:3.5px dashed #f0c674"></span> exclusion-only path</div>
       </div>
       <div class="mult">
         <div class="mult-title">Multiplicity</div>
