@@ -1,0 +1,23 @@
+name: PR Graph Comment
+
+# Generates Mermaid diagram from schema changes and posts to PR
+# Delegates to schema-graph-tools reusable workflow
+
+on:
+  pull_request:
+    paths:
+      - 'schema/**/*.star'
+      - '.github/workflows/pr-graph-comment.yml'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  graph-mermaid:
+    # Pinned to a commit rather than @main so a change in schema-graph-tools
+    # cannot alter this repo's CI without a PR here. Bump deliberately.
+    uses: project-kessel/schema-graph-tools/.github/workflows/mermaid-comment.yml@ec9be33d407307ffab67ed76b173d2821a4782f0
+    with:
+      schema-path: schema
+    secrets: inherit
