@@ -6,6 +6,7 @@ import (
 	"github.com/project-kessel/ksl-schema-language/pkg/intermediate"
 	"github.com/project-kessel/starlark-unified-schema/internal/lang"
 	"github.com/project-kessel/starlark-unified-schema/internal/output"
+	"github.com/project-kessel/starlark-unified-schema/internal/output/ksil"
 	"github.com/project-kessel/starlark-unified-schema/internal/util"
 	"github.com/stretchr/testify/assert"
 )
@@ -260,9 +261,9 @@ func verifyOutputs(t *testing.T, processor *lang.Processor, ksilModules map[stri
 		util.VerifyJSONSchemaResults(t, jsonSchema, jsonSchemaExamples)
 	}
 
-	ksil := output.NewKSILVisitor()
-	err = processor.Process(ksil)
+	ksilVisitor := ksil.NewKSILVisitor()
+	err = processor.Process(ksilVisitor)
 	if assert.NoError(t, err, "error processing ksil visitor") {
-		util.VerifyKSILResults(t, ksil, ksilModules)
+		util.VerifyKSILResults(t, ksilVisitor, ksilModules)
 	}
 }

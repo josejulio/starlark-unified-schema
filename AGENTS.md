@@ -9,5 +9,6 @@ Repo rules:
 - `common_representation.star` is a plain dict, not `resource()`
 - `references/` is obsolete — do not treat as source of truth
 - run `make test` after interpreter changes; run `make build-schema` after `.star` or output changes
+- **`interpreter/compile` is a public API** consumed by external tooling (e.g., `project-kessel/schema-graph-tools`); changes to `SchemaVisitor` interface (new DSL nodes, data types, permission expressions) are breaking changes that require coordination with consumers
 - update README / ARCHITECTURE / relevant TESTING.md in the same PR when your change makes them wrong — do not copy their content here
 - only git commit when the user asks

@@ -1,10 +1,11 @@
-package output
+package ksil
 
 import (
 	"strings"
 	"testing"
 
 	"github.com/project-kessel/ksl-schema-language/pkg/intermediate"
+	"github.com/project-kessel/starlark-unified-schema/internal/output"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -13,7 +14,7 @@ func TestKSILVisitorRelation(t *testing.T) {
 
 	v.BeginType("with_relation")
 	r := v.VisitRelation("relation", "test", "with_relation", "AtMostOne", v.VisitUUIDDataType())
-	assert.NoError(t, v.VisitResource("with_relation", "test", &Members{}, &Members{
+	assert.NoError(t, v.VisitResource("with_relation", "test", &output.Members{}, &output.Members{
 		RelationFields: []any{r},
 	}, nil))
 
@@ -41,7 +42,8 @@ func TestKSILVisitorWildcardRelation(t *testing.T) {
 	v := NewKSILVisitor()
 
 	r := v.VisitRelation("all_services", "features", "service", "All", v.VisitUUIDDataType())
-	assert.NoError(t, v.VisitResource("workspace", "features", &Members{}, &Members{
+
+	assert.NoError(t, v.VisitResource("workspace", "features", &output.Members{}, &output.Members{
 		RelationFields: []any{r},
 	}, nil))
 
@@ -73,7 +75,7 @@ func TestKSILVisitorRelationWithPermission(t *testing.T) {
 	v.BeginType("with_relation")
 	r := v.VisitRelation("relation", "test", "with_relation", "AtMostOne", v.VisitUUIDDataType())
 	p := v.VisitPermission("permission", v.VisitReferenceExpression("relation"))
-	assert.NoError(t, v.VisitResource("with_relation", "test", &Members{}, &Members{
+	assert.NoError(t, v.VisitResource("with_relation", "test", &output.Members{}, &output.Members{
 		RelationFields: []any{r},
 		Permissions:    []any{p},
 	}, nil))
@@ -124,7 +126,7 @@ func TestKSILVisitorWithLogic(t *testing.T) {
 			),
 		),
 	)) // a.intersect(b.union(a.except(c)))
-	assert.NoError(t, v.VisitResource("with_logic", "test", &Members{}, &Members{
+	assert.NoError(t, v.VisitResource("with_logic", "test", &output.Members{}, &output.Members{
 		RelationFields: []any{a, b, c},
 		Permissions:    []any{p},
 	}, nil))
@@ -201,14 +203,14 @@ func TestKSILVisitorCrossTypeSubRelation(t *testing.T) {
 	v.BeginType("some")
 	o := v.VisitRelation("other", "test", "other", "ExactlyOne", v.VisitUUIDDataType())
 	p := v.VisitPermission("permission", v.VisitSubReferenceExpression("other", "sub"))
-	assert.NoError(t, v.VisitResource("some", "test", &Members{}, &Members{
+	assert.NoError(t, v.VisitResource("some", "test", &output.Members{}, &output.Members{
 		RelationFields: []any{o},
 		Permissions:    []any{p},
 	}, nil))
 
 	v.BeginType("other")
 	s := v.VisitRelation("sub", "test", "other", "AtMostOne", v.VisitUUIDDataType())
-	assert.NoError(t, v.VisitResource("other", "test", &Members{}, &Members{
+	assert.NoError(t, v.VisitResource("other", "test", &output.Members{}, &output.Members{
 		RelationFields: []any{s},
 	}, nil))
 
@@ -260,12 +262,12 @@ func TestKSILVisitorCrossNamespaceRelation(t *testing.T) {
 
 	v.BeginType("some")
 	o := v.VisitRelation("other", "test_other", "other", "ExactlyOne", v.VisitUUIDDataType())
-	assert.NoError(t, v.VisitResource("some", "test", &Members{}, &Members{
+	assert.NoError(t, v.VisitResource("some", "test", &output.Members{}, &output.Members{
 		RelationFields: []any{o},
 	}, nil))
 
 	v.BeginType("other")
-	assert.NoError(t, v.VisitResource("other", "test_other", &Members{}, &Members{}, nil))
+	assert.NoError(t, v.VisitResource("other", "test_other", &output.Members{}, &output.Members{}, nil))
 
 	verifyKSILResults(t, v, map[string]*intermediate.Namespace{
 		"test.json": &intermediate.Namespace{
@@ -305,7 +307,7 @@ func TestKSILVisitorSubclassType(t *testing.T) {
 
 	v.BeginType("super")
 	p := v.VisitRelation("parent", ns, "super", "AtMostOne", v.VisitUUIDDataType())
-	assert.NoError(t, v.VisitResource("super", ns, &Members{}, &Members{
+	assert.NoError(t, v.VisitResource("super", ns, &output.Members{}, &output.Members{
 		RelationFields: []any{p},
 	}, nil))
 
@@ -315,10 +317,10 @@ func TestKSILVisitorSubclassType(t *testing.T) {
 		v.VisitReferenceExpression("direct_enabled"),
 		v.VisitSubReferenceExpression("parent", "enabled"),
 	))
-	assert.NoError(t, v.VisitResource("sub", ns, &Members{}, &Members{
+	assert.NoError(t, v.VisitResource("sub", ns, &output.Members{}, &output.Members{
 		RelationFields: []any{d},
 		Permissions:    []any{e},
-	}, &ResourceTypeReference{Name: "super", Reporter: ns}))
+	}, &output.ResourceTypeReference{Name: "super", Reporter: ns}))
 
 	verifyKSILResults(t, v, map[string]*intermediate.Namespace{
 		"test.json": &intermediate.Namespace{
@@ -395,9 +397,9 @@ func TestKSILVisitorTypeWithCommon(t *testing.T) {
 	c := v.VisitRelation("workspace", "rbac", "workspace", "AtMostOne", v.VisitUUIDDataType())
 	p := v.VisitPermission("view", v.VisitSubReferenceExpression("workspace", "inventory_host_view"))
 
-	assert.NoError(t, v.VisitResource("host", "hbi", &Members{
+	assert.NoError(t, v.VisitResource("host", "hbi", &output.Members{
 		RelationFields: []any{c},
-	}, &Members{
+	}, &output.Members{
 		Permissions: []any{p},
 	}, nil))
 
