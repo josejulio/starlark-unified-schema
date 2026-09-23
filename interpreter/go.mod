@@ -1,4 +1,4 @@
-module github.com/project-kessel/starlark-unified-schema
+module github.com/josejulio/starlark-unified-schema/interpreter
 
 go 1.25.0
 
